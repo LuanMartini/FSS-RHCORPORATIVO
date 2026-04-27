@@ -1,10 +1,13 @@
-const express = require('express');
-const app = express();
+import Fastify from 'fastify';
+import jwt from '@fastify/jwt';
+import { usuarioRoutes } from './routes/usuarioRoutes.js';
+import { rhRoutes } from './routes/rhRoutes.js';
 
-app.use(express.json());
+const app = Fastify();
 
+app.register(jwt, { secret: 'CHAVE_SECRETA_IFC' });
 
-const usuarioRoutes = require('./routes/usuarioRoutes');
-app.use('/usuarios', usuarioRoutes);
+app.register(usuarioRoutes);
+app.register(rhRoutes, { prefix: '/rh' });
 
-module.exports = app;
+export default app;

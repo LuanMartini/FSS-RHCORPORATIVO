@@ -1,9 +1,6 @@
-const express = require('express');
-const router = express.Router();
+import { registrarAdmin, login } from '../controllers/usuarioControllers.js';
 
-const usuarioController = require('../controllers/usuarioController');
-
-router.post('/', usuarioController.criarUsuario);
-router.get('/', usuarioController.listarUsuarios);
-
-module.exports = router;
+export async function usuarioRoutes(app) {
+    app.post('/registrar', registrarAdmin);
+    app.post('/login', login);
+}

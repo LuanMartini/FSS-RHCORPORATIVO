@@ -1,19 +1,11 @@
-const { Pool } = require('pg');
-
-const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-});
-
-pool.connect()
-    .then(() => {
-        console.log('PostgreSQL conectado');
-    })
-    .catch((err) => {
-        console.error('Erro ao conectar PostgreSQL:', err);
-    });
-
-module.exports = pool;
+export const usuariosDB = [];
+export const departamentos = [
+    { id: 1, nome: "Tecnologia", sigla: "TI" },
+    { id: 2, nome: "Recursos Humanos", sigla: "RH" }
+];
+export const cargos = [
+    { id: 1, nome: "Desenvolvedor Júnior", departamentoId: 1, salarioBase: 3500 },
+    { id: 2, nome: "Analista de RH", departamentoId: 2, salarioBase: 4000 }
+];
+export const funcionarios = [];
+export const registrosPonto = [];
