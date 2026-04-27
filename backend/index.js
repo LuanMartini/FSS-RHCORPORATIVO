@@ -1,11 +1,5 @@
-require('dotenv').config();
-const app = require('./src/app');
-const connectDB = require('./src/config/db');
+import app from './app.js';
 
-connectDB();
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+app.listen({ port: 3333 }).then(() => {
+    console.log(" API RH rodando em http://localhost:3333");
 });
