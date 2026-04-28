@@ -3,10 +3,29 @@ import jwt from '@fastify/jwt';
 import { usuarioRoutes } from './routes/usuarioRoutes.js';
 import { rhRoutes } from './routes/rhRoutes.js';
 
-const app = Fastify();
+const app = Fastify({ logger: false });
 
-app.register(jwt, { secret: 'CHAVE_SECRETA_IFC' });
+// JWT
+app.register(jwt, { secret: process.env.JWT_SECRET || 'CHAVE_SECRETA_IFC' });
 
+// Decorator para rotas protegidas fora do plugin rhRoutes
+app.decorate('authenticate', async function(req, reply) {
+    try { await req.jwtVerify(); }
+    catch { reply.status(401).send({ erro: "Token inválido ou expirado" }); }
+});
+
+// CORS básico
+app.addHook('onRequest', async (req, reply) => {
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    if (req.method === 'OPTIONS') return reply.status(204).send();
+});
+
+// Health check
+app.get('/health', async () => ({ status: 'ok', versao: '2.0.0', timestamp: new Date().toISOString() }));
+
+// Rotas
 app.register(usuarioRoutes);
 app.register(rhRoutes, { prefix: '/rh' });
 
