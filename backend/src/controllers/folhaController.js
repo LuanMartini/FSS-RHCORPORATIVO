@@ -3,14 +3,12 @@ import { calcularHolerite } from './rhController.js';
 
 export const folhaController = {
 
-    // Holerite individual
     gerarHolerite: async (req, res) => {
         const f = funcionarios.find(f => f.id === Number(req.params.id));
         if (!f) return res.status(404).send({ erro: "Funcionário não encontrado" });
         return calcularHolerite(f);
     },
 
-    // Folha completa do mês (todos os ativos)
     gerarFolhaCompleta: async (req, res) => {
         const ativos = funcionarios.filter(f => f.status === "ATIVO");
         if (ativos.length === 0) return res.status(404).send({ erro: "Nenhum funcionário ativo" });

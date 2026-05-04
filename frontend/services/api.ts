@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3000';
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3333';
 
 function getToken(): string | null {
   return localStorage.getItem('token');
@@ -14,7 +14,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     ...options,
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.erro || data.message || 'Erro na requisição');
+  const text = await res.text();
+  const data = (text ? JSON.parse(text) : {}) as unknown;
+
+  if (!res.ok) {
+    const err = data as { erro?: string; message?: string };
+    throw new Error(err.erro || err.message || 'Erro na requisição');
+  }
   return data as T;
 }
+
+export { API_BASE };

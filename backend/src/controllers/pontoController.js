@@ -40,7 +40,6 @@ export const pontoController = {
             });
         }
 
-        // Calcular horas trabalhadas por dia
         const porDia = {};
         registros.forEach(r => {
             if (!porDia[r.data]) porDia[r.data] = [];

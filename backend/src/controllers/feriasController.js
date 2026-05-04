@@ -50,7 +50,6 @@ export const feriasController = {
         ferias[idx].aprovadoPor = req.user.id;
         ferias[idx].aprovadoEm  = new Date().toISOString();
 
-        // Atualizar status do funcionário
         const fIdx = funcionarios.findIndex(f => f.id === ferias[idx].funcionarioId);
         if (fIdx !== -1) funcionarios[fIdx].status = "FERIAS";
 

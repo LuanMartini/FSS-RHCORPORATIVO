@@ -64,8 +64,8 @@ export default function Login({ onSwitch }: Props) {
           <p className="text-sm text-slate-400 mb-9">Acesse o painel administrativo</p>
 
           {error && (
-            <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2">
-              ⚠ {error}
+            <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+              {error}
             </div>
           )}
 

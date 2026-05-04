@@ -13,7 +13,7 @@ export const treinamentosController = {
             cargaHoraria: Number(cargaHoraria),
             dataInicio: dataInicio || null,
             dataFim: dataFim || null,
-            modalidade: modalidade || "PRESENCIAL", // PRESENCIAL | ONLINE | HIBRIDO
+            modalidade: modalidade || "PRESENCIAL",
             criadoPor: req.user.id,
             criadoEm: new Date().toISOString(),
         };

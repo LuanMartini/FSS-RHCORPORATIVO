@@ -2,7 +2,6 @@ import { departamentos, cargos, funcionarios } from '../config/db.js';
 
 export const estruturaController = {
 
-    // ── Departamentos ─────────────────────────────────────────────────────────
     listarDepartamentos: async (req, res) => {
         return departamentos.map(d => ({
             ...d,
@@ -47,7 +46,6 @@ export const estruturaController = {
         return { mensagem: "Departamento removido" };
     },
 
-    // ── Cargos ────────────────────────────────────────────────────────────────
     listarCargos: async (req, res) => {
         const { departamentoId } = req.query;
         let lista = cargos;

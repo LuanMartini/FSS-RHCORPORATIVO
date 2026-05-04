@@ -1,6 +1,4 @@
-import { funcionarios, registrosPonto, cargos, departamentos, historicoSalarial } from '../config/db.js';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+import { funcionarios, cargos, departamentos, historicoSalarial } from '../config/db.js';
 
 function enriquecerFuncionario(f) {
     const cargo = cargos.find(c => c.id === f.cargoId) || null;
@@ -8,11 +6,8 @@ function enriquecerFuncionario(f) {
     return { ...f, cargo, departamento: depto };
 }
 
-// ─── Controller ───────────────────────────────────────────────────────────────
-
 export const rhController = {
 
-    // ── Admissão ─────────────────────────────────────────────────────────────
     admitir: async (req, res) => {
         const { nome, cpf, email, cargoId, departamentoId, salario, dataAdmissao, telefone, dataNascimento } = req.body;
 
@@ -45,7 +40,6 @@ export const rhController = {
         return res.status(201).send(enriquecerFuncionario(novo));
     },
 
-    // ── Listagem ─────────────────────────────────────────────────────────────
     listarTodos: async (req, res) => {
         const { status, departamentoId, cargoId, busca } = req.query;
         let lista = funcionarios;
@@ -65,24 +59,21 @@ export const rhController = {
         return lista.map(enriquecerFuncionario);
     },
 
-    // ── Buscar por ID ─────────────────────────────────────────────────────────
     buscarPorId: async (req, res) => {
         const f = funcionarios.find(f => f.id === Number(req.params.id));
         if (!f) return res.status(404).send({ erro: "Funcionário não encontrado" });
         return enriquecerFuncionario(f);
     },
 
-    // ── Atualizar dados ───────────────────────────────────────────────────────
     atualizar: async (req, res) => {
         const idx = funcionarios.findIndex(f => f.id === Number(req.params.id));
         if (idx === -1) return res.status(404).send({ erro: "Funcionário não encontrado" });
 
-        const { cpf, id, ...changes } = req.body; // CPF e ID não podem ser alterados
+        const { cpf, id, ...changes } = req.body;
         funcionarios[idx] = { ...funcionarios[idx], ...changes };
         return enriquecerFuncionario(funcionarios[idx]);
     },
 
-    // ── Desligamento ──────────────────────────────────────────────────────────
     desligar: async (req, res) => {
         const idx = funcionarios.findIndex(f => f.id === Number(req.params.id));
         if (idx === -1) return res.status(404).send({ erro: "Funcionário não encontrado" });
@@ -97,7 +88,6 @@ export const rhController = {
         return { mensagem: "Funcionário desligado com sucesso", funcionario: funcionarios[idx] };
     },
 
-    // ── Reajuste salarial ─────────────────────────────────────────────────────
     reajustarSalario: async (req, res) => {
         const idx = funcionarios.findIndex(f => f.id === Number(req.params.id));
         if (idx === -1) return res.status(404).send({ erro: "Funcionário não encontrado" });
@@ -127,7 +117,6 @@ export const rhController = {
         };
     },
 
-    // ── Histórico salarial ────────────────────────────────────────────────────
     historicoSalarial: async (req, res) => {
         const id = Number(req.params.id);
         if (!funcionarios.find(f => f.id === id)) {
@@ -135,72 +124,20 @@ export const rhController = {
         }
         return historicoSalarial.filter(h => h.funcionarioId === id);
     },
-
-    // ── Registro de ponto ─────────────────────────────────────────────────────
-    registrarPonto: async (req, res) => {
-        const { funcionarioId, tipo } = req.body;
-        const f = funcionarios.find(f => f.id === Number(funcionarioId));
-        if (!f) return res.status(404).send({ erro: "Funcionário não encontrado" });
-        if (!["ENTRADA", "SAIDA", "INTERVALO_INICIO", "INTERVALO_FIM"].includes(tipo)) {
-            return res.status(400).send({ erro: "tipo deve ser ENTRADA, SAIDA, INTERVALO_INICIO ou INTERVALO_FIM" });
-        }
-
-        const registro = {
-            id: registrosPonto.length + 1,
-            funcionarioId: Number(funcionarioId),
-            tipo,
-            data: new Date().toLocaleDateString('pt-BR'),
-            hora: new Date().toLocaleTimeString('pt-BR'),
-            timestamp: new Date().toISOString(),
-        };
-        registrosPonto.push(registro);
-        return res.status(201).send(registro);
-    },
-
-    // ── Espelho de ponto ──────────────────────────────────────────────────────
-    espelhoPonto: async (req, res) => {
-        const id = Number(req.params.id);
-        if (!funcionarios.find(f => f.id === id)) {
-            return res.status(404).send({ erro: "Funcionário não encontrado" });
-        }
-
-        const { mes, ano } = req.query;
-        let registros = registrosPonto.filter(p => p.funcionarioId === id);
-
-        if (mes && ano) {
-            registros = registros.filter(p => {
-                const d = new Date(p.timestamp);
-                return d.getMonth() + 1 === Number(mes) && d.getFullYear() === Number(ano);
-            });
-        }
-
-        return { funcionarioId: id, totalRegistros: registros.length, registros };
-    },
-
-    // ── Holerite ──────────────────────────────────────────────────────────────
-    gerarHolerite: async (req, res) => {
-        const f = funcionarios.find(f => f.id === Number(req.params.id));
-        if (!f) return res.status(404).send({ erro: "Funcionário não encontrado" });
-
-        return calcularHolerite(f);
-    },
 };
 
-// ─── Cálculo de holerite (exportado para uso em folhaController) ───────────────
 export function calcularHolerite(f) {
     const bruto = f.salario;
 
-    // INSS (tabela progressiva simplificada 2024)
     let inss = 0;
     if      (bruto <= 1412.00)  inss = bruto * 0.075;
     else if (bruto <= 2666.68)  inss = bruto * 0.09;
     else if (bruto <= 4000.03)  inss = bruto * 0.12;
     else if (bruto <= 7786.02)  inss = bruto * 0.14;
-    else                         inss = 7786.02 * 0.14; // teto
+    else                         inss = 7786.02 * 0.14;
 
     const baseIRRF = bruto - inss;
 
-    // IRRF (tabela 2024)
     let irrf = 0;
     if      (baseIRRF <= 2259.20) irrf = 0;
     else if (baseIRRF <= 2826.65) irrf = baseIRRF * 0.075 - 169.44;

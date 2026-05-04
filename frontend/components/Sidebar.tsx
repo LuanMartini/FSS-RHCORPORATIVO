@@ -1,16 +1,22 @@
-import { Page } from "../App";
+import type { CSSProperties } from "react";
+import type { Page } from "../types/page";
 
 interface Props {
   page: Page;
   setPage: (p: Page) => void;
 }
 
-const navItems: { key: Page; icon: string; label: string }[] = [
-  { key: "dashboard",    icon: "⊞",  label: "Dashboard" },
-  { key: "funcionarios", icon: "👥", label: "Funcionários" },
-  { key: "admitir",      icon: "＋", label: "Admitir Funcionário" },
-  { key: "ponto",        icon: "⏱", label: "Registrar Ponto" },
-  { key: "holerite",     icon: "📄", label: "Holerite" },
+const navItems: { key: Page; label: string }[] = [
+  { key: "dashboard",     label: "Dashboard" },
+  { key: "funcionarios",  label: "Funcionários" },
+  { key: "admitir",       label: "Admitir" },
+  { key: "ponto",         label: "Ponto" },
+  { key: "holerite",      label: "Holerite" },
+  { key: "folha",         label: "Folha do mês" },
+  { key: "ferias",        label: "Férias" },
+  { key: "beneficios",    label: "Benefícios" },
+  { key: "treinamentos",  label: "Treinamentos" },
+  { key: "advertencias",  label: "Advertências" },
 ];
 
 export default function Sidebar({ page, setPage }: Props) {
@@ -22,13 +28,13 @@ export default function Sidebar({ page, setPage }: Props) {
         {navItems.map((item) => (
           <button
             key={item.key}
+            type="button"
             onClick={() => setPage(item.key)}
             style={{
               ...styles.button,
               ...(page === item.key ? styles.active : {}),
             }}
           >
-            <span style={styles.icon}>{item.icon}</span>
             {item.label}
           </button>
         ))}
@@ -37,7 +43,7 @@ export default function Sidebar({ page, setPage }: Props) {
   );
 }
 
-const styles: { [key: string]: React.CSSProperties } = {
+const styles: Record<string, CSSProperties> = {
   sidebar: {
     width: "220px",
     height: "100vh",
@@ -46,6 +52,10 @@ const styles: { [key: string]: React.CSSProperties } = {
     padding: "20px",
     display: "flex",
     flexDirection: "column",
+    position: "fixed",
+    left: 0,
+    top: 0,
+    overflowY: "auto",
   },
 
   title: {
@@ -53,25 +63,20 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
 
   button: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
+    display: "block",
     width: "100%",
     padding: "10px",
-    marginBottom: "10px",
+    marginBottom: "8px",
     background: "transparent",
     border: "none",
     color: "#fff",
     cursor: "pointer",
     textAlign: "left",
     borderRadius: "8px",
+    fontSize: "14px",
   },
 
   active: {
     background: "#34345a",
-  },
-
-  icon: {
-    fontSize: "18px",
   },
 };

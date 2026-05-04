@@ -1,6 +1,4 @@
-// ─── Banco de dados em memória ────────────────────────────────────────────────
-// Estrutura pronta para migrar para PostgreSQL/MySQL — basta trocar os arrays
-// por queries reais nos controllers.
+// Dados em memória (substituir por persistência real quando necessário).
 
 export const usuariosDB = [];
 
