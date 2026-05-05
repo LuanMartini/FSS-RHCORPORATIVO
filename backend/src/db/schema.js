@@ -182,23 +182,34 @@ export async function ensureSchema() {
 
 export async function seedIfEmpty() {
   const u = await all('SELECT COUNT(*) AS c FROM usuarios');
-  const n = Number(u[0]?.c ?? 0);
+  const n = Number(u[0]?.c ?? u[0]?.['COUNT(*)'] ?? 0);
+  
   if (n > 0) return;
+
   const hash = await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || 'admin123', 10);
-  await run(
-    'INSERT INTO usuarios (nome, email, senha_hash) VALUES (?, ?, ?)',
-    ['Administrador', process.env.SEED_ADMIN_EMAIL || 'admin@empresa.com', hash]
+  const email = process.env.SEED_ADMIN_EMAIL || 'admin@empresa.com';
+
+  // Inserindo o Usuário Admin
+  await execRaw(
+    `INSERT INTO usuarios (nome, email, senha_hash) VALUES ('Administrador', '${email}', '${hash}')`
   );
-  await run(
-    'INSERT INTO departamentos (nome, sigla) VALUES (?, ?), (?, ?)',
-    ['Recursos Humanos', 'RH', 'Tecnologia', 'TI']
+
+  // Inserindo Departamentos
+  await execRaw(
+    `INSERT INTO departamentos (nome, sigla) VALUES ('Recursos Humanos', 'RH'), ('Tecnologia', 'TI')`
   );
+
   const depts = await all('SELECT id, sigla FROM departamentos ORDER BY id');
-  const rh = depts.find((d) => d.sigla === 'RH').id;
-  const ti = depts.find((d) => d.sigla === 'TI').id;
-  await run(
-    `INSERT INTO cargos (nome, departamento_id, salario_base) VALUES
-      (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
-    ['Analista de RH', rh, 4200, 'Desenvolvedor', ti, 8500, 'Gerente de TI', ti, 12000]
-  );
+  const rh = depts.find((d) => d.sigla === 'RH')?.id;
+  const ti = depts.find((d) => d.sigla === 'TI')?.id;
+
+  if (rh && ti) {
+    // Inserindo Cargos
+    await execRaw(
+      `INSERT INTO cargos (nome, departamento_id, salario_base) VALUES 
+      ('Analista de RH', ${rh}, 4200.00), 
+      ('Desenvolvedor', ${ti}, 8500.00), 
+      ('Gerente de TI', ${ti}, 12000.00)`
+    );
+  }
 }
