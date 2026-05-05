@@ -1,68 +1,32 @@
-import { rhController }          from '../controllers/rhController.js';
-import { dashboardController }   from '../controllers/dashboardController.js';
-import { folhaController }       from '../controllers/folhaController.js';
-import { pontoController }       from '../controllers/pontoController.js';
-import { estruturaController }   from '../controllers/estruturaController.js';
-import { feriasController }      from '../controllers/feriasController.js';
-import { beneficiosController }  from '../controllers/beneficiosController.js';
-import { advertenciasController } from '../controllers/advertenciasController.js';
-import { treinamentosController } from '../controllers/treinamentosController.js';
+import { Router } from 'express';
+import { authMiddleware } from '../middleware/auth.js';
+import * as c from '../controllers/rhController.js';
 
-export async function rhRoutes(app) {
+const r = Router();
+r.use(authMiddleware);
 
-    app.addHook("onRequest", async (req, reply) => {
-        try { await req.jwtVerify(); }
-        catch { reply.status(401).send({ erro: "Acesso negado. Faça login primeiro." }); }
-    });
+r.get('/dashboard', c.dashboard);
+r.get('/funcionarios', c.funcionarios);
+r.delete('/funcionarios/:id', c.funcionarioDesligar);
+r.get('/cargos', c.cargos);
+r.get('/departamentos', c.departamentos);
+r.post('/admitir', c.admitir);
+r.post('/ponto', c.pontoPost);
+r.get('/ponto/:funcionarioId', c.pontoEspelho);
+r.get('/ferias', c.feriasList);
+r.post('/ferias', c.feriasPost);
+r.patch('/ferias/:id/aprovar', c.feriasAprovar);
+r.patch('/ferias/:id/reprovar', c.feriasReprovar);
+r.patch('/ferias/:id/encerrar', c.feriasEncerrar);
+r.get('/advertencias', c.advertenciasList);
+r.post('/advertencias', c.advertenciasPost);
+r.get('/beneficios', c.beneficiosList);
+r.post('/beneficios', c.beneficiosPost);
+r.post('/beneficios/vincular', c.beneficiosVincular);
+r.get('/treinamentos', c.treinamentosList);
+r.post('/treinamentos', c.treinamentosPost);
+r.post('/treinamentos/inscrever', c.treinamentosInscrever);
+r.get('/folha', c.folhaCompleta);
+r.get('/folha/:id', c.folhaUm);
 
-    app.get('/dashboard', dashboardController.metricasGerais);
-
-    app.post('/admitir',              rhController.admitir);
-    app.get('/funcionarios',          rhController.listarTodos);
-    app.get('/funcionarios/:id',      rhController.buscarPorId);
-    app.put('/funcionarios/:id',      rhController.atualizar);
-    app.delete('/funcionarios/:id',   rhController.desligar);
-    app.patch('/funcionarios/:id/salario',         rhController.reajustarSalario);
-    app.get('/funcionarios/:id/historico-salarial', rhController.historicoSalarial);
-
-    app.post('/ponto',                    pontoController.registrar);
-    app.get('/ponto/:id',                 pontoController.espelhoPonto);
-    app.patch('/ponto/registro/:id',      pontoController.corrigirPonto);
-
-    app.get('/folha/:id',          folhaController.gerarHolerite);
-    app.get('/folha',              folhaController.gerarFolhaCompleta);
-
-    app.get('/departamentos',           estruturaController.listarDepartamentos);
-    app.get('/departamentos/:id',       estruturaController.buscarDepartamento);
-    app.post('/departamentos',          estruturaController.criarDepartamento);
-    app.put('/departamentos/:id',       estruturaController.atualizarDepartamento);
-    app.delete('/departamentos/:id',    estruturaController.excluirDepartamento);
-
-    app.get('/cargos',          estruturaController.listarCargos);
-    app.get('/cargos/:id',      estruturaController.buscarCargo);
-    app.post('/cargos',         estruturaController.criarCargo);
-    app.put('/cargos/:id',      estruturaController.atualizarCargo);
-    app.delete('/cargos/:id',   estruturaController.excluirCargo);
-
-    app.post('/ferias',                    feriasController.solicitar);
-    app.get('/ferias',                     feriasController.listar);
-    app.patch('/ferias/:id/aprovar',       feriasController.aprovar);
-    app.patch('/ferias/:id/reprovar',      feriasController.reprovar);
-    app.patch('/ferias/:id/encerrar',      feriasController.encerrar);
-
-    app.get('/beneficios',                                      beneficiosController.listarBeneficios);
-    app.post('/beneficios',                                     beneficiosController.criarBeneficio);
-    app.post('/beneficios/vincular',                            beneficiosController.vincularFuncionario);
-    app.delete('/beneficios/vinculo/:id',                       beneficiosController.desvincularFuncionario);
-    app.get('/beneficios/funcionario/:funcionarioId',           beneficiosController.beneficiosPorFuncionario);
-
-    app.post('/advertencias',                              advertenciasController.registrar);
-    app.get('/advertencias',                               advertenciasController.listarTodas);
-    app.get('/advertencias/funcionario/:funcionarioId',    advertenciasController.listarPorFuncionario);
-
-    app.post('/treinamentos',                               treinamentosController.criar);
-    app.get('/treinamentos',                                treinamentosController.listar);
-    app.post('/treinamentos/inscrever',                     treinamentosController.inscrever);
-    app.patch('/treinamentos/inscricao/:id/concluir',       treinamentosController.concluir);
-    app.get('/treinamentos/funcionario/:funcionarioId',     treinamentosController.treinamentosPorFuncionario);
-}
+export default r;

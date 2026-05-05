@@ -1,16 +1,19 @@
 {
-  "name": "fss-rhcorporativo-backend",
-  "version": "2.0.0",
-  "description": "API de RH Corporativo - Fastify",
-  "main": "index.js",
+  "name": "rhcorp-backend",
+  "version": "1.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch index.js",
-    "start": "node index.js"
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js"
   },
   "dependencies": {
-    "@fastify/jwt": "^9.0.0",
     "bcryptjs": "^2.4.3",
-    "fastify": "^5.0.0"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "pg": "^8.13.0"
   }
 }

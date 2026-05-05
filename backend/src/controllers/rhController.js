@@ -1,166 +1,316 @@
-import { funcionarios, cargos, departamentos, historicoSalarial } from '../config/db.js';
+import * as rh from '../models/rh.js';
+import { montarHolerite, holeritePublico, fmt, calcularFGTS } from '../services/payrollService.js';
 
-function enriquecerFuncionario(f) {
-    const cargo = cargos.find(c => c.id === f.cargoId) || null;
-    const depto = departamentos.find(d => d.id === f.departamentoId) || null;
-    return { ...f, cargo, departamento: depto };
+function horaBr(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export const rhController = {
+export async function dashboard(req, res) {
+  try {
+    const st = await rh.countsFuncionarios();
+    const total = st.ATIVO + st.DESLIGADO + st.FERIAS;
+    const folks = await rh.listFuncionariosComSalario();
+    let custoMensalBruto = 0;
+    let custoFGTS = 0;
+    const salarios = [];
+    for (const f of folks) {
+      const sb = Number(f.salario);
+      custoMensalBruto += sb;
+      custoFGTS += calcularFGTS(sb);
+      salarios.push(sb);
+    }
+    salarios.sort((a, b) => a - b);
+    const n = salarios.length;
+    const media = n ? custoMensalBruto / n : 0;
+    const maior = n ? salarios[n - 1] : 0;
+    const menor = n ? salarios[0] : 0;
+    const encargos = custoFGTS;
+    const custoTotalEmpresa = custoMensalBruto + encargos;
+    const { cargos: totalCargos, deptos: totalDepartamentos } = await rh.countsCargosDeptos();
+    const dist = await rh.countsDeptDist();
+    const registrosHoje = await rh.countPontoHoje();
 
-    admitir: async (req, res) => {
-        const { nome, cpf, email, cargoId, departamentoId, salario, dataAdmissao, telefone, dataNascimento } = req.body;
+    res.json({
+      colaboradores: {
+        total,
+        ativos: st.ATIVO,
+        desligados: st.DESLIGADO,
+        emFerias: st.FERIAS,
+      },
+      folha: {
+        custoMensalBruto: fmt(custoMensalBruto),
+        mediaSalarial: fmt(media),
+        maiorSalario: fmt(maior),
+        menorSalario: fmt(menor),
+        custoFGTS: fmt(custoFGTS),
+        custoTotalEmpresa: fmt(custoTotalEmpresa),
+      },
+      estrutura: {
+        totalDepartamentos,
+        totalCargos,
+        distribuicaoPorDepto: dist.map((r) => ({
+          departamento: r.departamento,
+          sigla: r.sigla,
+          total: Number(r.total),
+        })),
+      },
+      pontoDoDia: { registrosHoje },
+    });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        if (!nome || !cpf || !email || !cargoId || !salario) {
-            return res.status(400).send({ erro: "Campos obrigatórios: nome, cpf, email, cargoId, salario" });
-        }
+export async function funcionarios(req, res) {
+  try {
+    const rows = await rh.listFuncionarios();
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        if (funcionarios.find(f => f.cpf === cpf)) {
-            return res.status(409).send({ erro: "CPF já cadastrado" });
-        }
-        if (funcionarios.find(f => f.email === email)) {
-            return res.status(409).send({ erro: "E-mail já cadastrado" });
-        }
+export async function funcionarioDesligar(req, res) {
+  try {
+    await rh.desligarFuncionario(req.params.id);
+    res.status(204).end();
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        const novoCargo = cargos.find(c => c.id === Number(cargoId));
-        if (!novoCargo) return res.status(404).send({ erro: "Cargo não encontrado" });
+export async function cargos(req, res) {
+  try {
+    res.json(await rh.listCargos());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        const novo = {
-            id: funcionarios.length + 1,
-            nome, cpf, email, telefone: telefone || null,
-            dataNascimento: dataNascimento || null,
-            cargoId: Number(cargoId),
-            departamentoId: departamentoId ? Number(departamentoId) : novoCargo.departamentoId,
-            salario: Number(salario),
-            status: "ATIVO",
-            dataAdmissao: dataAdmissao || new Date().toLocaleDateString('pt-BR'),
-        };
+export async function departamentos(req, res) {
+  try {
+    res.json(await rh.listDepartamentos());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        funcionarios.push(novo);
-        return res.status(201).send(enriquecerFuncionario(novo));
-    },
+export async function admitir(req, res) {
+  try {
+    const b = req.body ?? {};
+    const cargoId = Number(b.cargoId);
+    const deptId = b.departamentoId != null ? Number(b.departamentoId) : undefined;
+    if (!b.nome || !b.cpf || !b.email || !cargoId || !b.salario) {
+      return res.status(400).json({ erro: 'Dados incompletos' });
+    }
+    const cargos = await rh.listCargos();
+    const cg = cargos.find((c) => c.id === cargoId);
+    if (!cg) return res.status(400).json({ erro: 'Cargo inválido' });
+    await rh.admitir({
+      nome: String(b.nome).trim(),
+      cpf: String(b.cpf).replace(/\D/g, ''),
+      email: String(b.email).trim(),
+      cargoId,
+      departamentoId: deptId ?? cg.departamentoId,
+      salario: Number(b.salario),
+      telefone: b.telefone,
+      dataNascimento: b.dataNascimento,
+    });
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    if (e.code === '23505' || e.errno === 1062) {
+      return res.status(409).json({ erro: 'CPF ou e-mail já cadastrado' });
+    }
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    listarTodos: async (req, res) => {
-        const { status, departamentoId, cargoId, busca } = req.query;
-        let lista = funcionarios;
+export async function pontoPost(req, res) {
+  try {
+    const { funcionarioId, tipo } = req.body ?? {};
+    const row = await rh.insertPonto(Number(funcionarioId), String(tipo));
+    res.status(201).json({
+      tipo: row.tipo,
+      hora: horaBr(row.registrado_em),
+      registrado_em: row.registrado_em,
+    });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        if (status)         lista = lista.filter(f => f.status === status.toUpperCase());
-        if (departamentoId) lista = lista.filter(f => f.departamentoId === Number(departamentoId));
-        if (cargoId)        lista = lista.filter(f => f.cargoId === Number(cargoId));
-        if (busca) {
-            const q = busca.toLowerCase();
-            lista = lista.filter(f =>
-                f.nome.toLowerCase().includes(q) ||
-                f.email.toLowerCase().includes(q) ||
-                f.cpf.includes(q)
-            );
-        }
+export async function pontoEspelho(req, res) {
+  try {
+    const rows = await rh.espelhoPonto(req.params.funcionarioId);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        return lista.map(enriquecerFuncionario);
-    },
+export async function feriasList(req, res) {
+  try {
+    res.json(await rh.listFerias());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    buscarPorId: async (req, res) => {
-        const f = funcionarios.find(f => f.id === Number(req.params.id));
-        if (!f) return res.status(404).send({ erro: "Funcionário não encontrado" });
-        return enriquecerFuncionario(f);
-    },
+export async function feriasPost(req, res) {
+  try {
+    await rh.createFeria(req.body ?? {});
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    atualizar: async (req, res) => {
-        const idx = funcionarios.findIndex(f => f.id === Number(req.params.id));
-        if (idx === -1) return res.status(404).send({ erro: "Funcionário não encontrado" });
+export async function feriasAprovar(req, res) {
+  try {
+    const ok = await rh.feriasAprovar(req.params.id);
+    if (!ok) return res.status(404).json({ erro: 'Registro não encontrado' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        const { cpf, id, ...changes } = req.body;
-        funcionarios[idx] = { ...funcionarios[idx], ...changes };
-        return enriquecerFuncionario(funcionarios[idx]);
-    },
+export async function feriasReprovar(req, res) {
+  try {
+    const motivo = req.body?.motivo ?? '';
+    const ok = await rh.feriasReprovar(req.params.id, motivo);
+    if (!ok) return res.status(404).json({ erro: 'Registro não encontrado' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    desligar: async (req, res) => {
-        const idx = funcionarios.findIndex(f => f.id === Number(req.params.id));
-        if (idx === -1) return res.status(404).send({ erro: "Funcionário não encontrado" });
-        if (funcionarios[idx].status === "DESLIGADO") {
-            return res.status(400).send({ erro: "Funcionário já está desligado" });
-        }
+export async function feriasEncerrar(req, res) {
+  try {
+    const ok = await rh.feriasEncerrar(req.params.id);
+    if (!ok) return res.status(404).json({ erro: 'Registro não encontrado' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        funcionarios[idx].status = "DESLIGADO";
-        funcionarios[idx].dataDesligamento = new Date().toLocaleDateString('pt-BR');
-        funcionarios[idx].motivoDesligamento = req.body.motivo || null;
+export async function advertenciasList(req, res) {
+  try {
+    res.json(await rh.listAdvertencias());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        return { mensagem: "Funcionário desligado com sucesso", funcionario: funcionarios[idx] };
-    },
+export async function advertenciasPost(req, res) {
+  try {
+    await rh.createAdvertencia(req.body ?? {});
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    reajustarSalario: async (req, res) => {
-        const idx = funcionarios.findIndex(f => f.id === Number(req.params.id));
-        if (idx === -1) return res.status(404).send({ erro: "Funcionário não encontrado" });
+export async function beneficiosList(req, res) {
+  try {
+    res.json(await rh.listBeneficios());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        const { novoSalario, motivo } = req.body;
-        if (!novoSalario || novoSalario <= 0) {
-            return res.status(400).send({ erro: "novoSalario inválido" });
-        }
+export async function beneficiosPost(req, res) {
+  try {
+    await rh.createBeneficio(req.body ?? {});
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        const salarioAnterior = funcionarios[idx].salario;
-        historicoSalarial.push({
-            id: historicoSalarial.length + 1,
-            funcionarioId: funcionarios[idx].id,
-            salarioAnterior,
-            novoSalario: Number(novoSalario),
-            motivo: motivo || null,
-            data: new Date().toLocaleDateString('pt-BR'),
-            responsavelId: req.user.id,
-        });
+export async function beneficiosVincular(req, res) {
+  try {
+    const { funcionarioId, beneficioId } = req.body ?? {};
+    await rh.vincularBeneficio(Number(funcionarioId), Number(beneficioId));
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-        funcionarios[idx].salario = Number(novoSalario);
-        return {
-            mensagem: "Salário atualizado",
-            salarioAnterior,
-            novoSalario: funcionarios[idx].salario,
-            variacao: `${(((novoSalario - salarioAnterior) / salarioAnterior) * 100).toFixed(1)}%`,
-        };
-    },
+export async function treinamentosList(req, res) {
+  try {
+    res.json(await rh.listTreinamentos());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    historicoSalarial: async (req, res) => {
-        const id = Number(req.params.id);
-        if (!funcionarios.find(f => f.id === id)) {
-            return res.status(404).send({ erro: "Funcionário não encontrado" });
-        }
-        return historicoSalarial.filter(h => h.funcionarioId === id);
-    },
-};
+export async function treinamentosPost(req, res) {
+  try {
+    await rh.createTreinamento(req.body ?? {});
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-export function calcularHolerite(f) {
-    const bruto = f.salario;
+export async function treinamentosInscrever(req, res) {
+  try {
+    const { funcionarioId, treinamentoId } = req.body ?? {};
+    await rh.inscreverTreinamento(Number(funcionarioId), Number(treinamentoId));
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    let inss = 0;
-    if      (bruto <= 1412.00)  inss = bruto * 0.075;
-    else if (bruto <= 2666.68)  inss = bruto * 0.09;
-    else if (bruto <= 4000.03)  inss = bruto * 0.12;
-    else if (bruto <= 7786.02)  inss = bruto * 0.14;
-    else                         inss = 7786.02 * 0.14;
+export async function folhaUm(req, res) {
+  try {
+    const f = await rh.getFuncionarioAtivo(req.params.id);
+    if (!f) return res.status(404).json({ erro: 'Funcionário não encontrado' });
+    const h = montarHolerite(f);
+    res.json(holeritePublico(h));
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
 
-    const baseIRRF = bruto - inss;
-
-    let irrf = 0;
-    if      (baseIRRF <= 2259.20) irrf = 0;
-    else if (baseIRRF <= 2826.65) irrf = baseIRRF * 0.075 - 169.44;
-    else if (baseIRRF <= 3751.05) irrf = baseIRRF * 0.15  - 381.44;
-    else if (baseIRRF <= 4664.68) irrf = baseIRRF * 0.225 - 662.77;
-    else                           irrf = baseIRRF * 0.275 - 896.00;
-
-    const fgts  = bruto * 0.08;
-    const liquido = bruto - inss - irrf;
-
-    const now = new Date();
-    return {
-        funcionario: { id: f.id, nome: f.nome, cpf: f.cpf, cargo: f.cargoId },
-        mesReferencia: now.getMonth() + 1,
-        anoReferencia: now.getFullYear(),
-        vencimentos: { salarioBase: bruto.toFixed(2) },
-        descontos: {
-            inss: inss.toFixed(2),
-            irrf: irrf.toFixed(2),
-        },
-        provisoes: { fgts: fgts.toFixed(2) },
-        totalBruto:   bruto.toFixed(2),
-        totalDescontos: (inss + irrf).toFixed(2),
-        totalLiquido:  liquido.toFixed(2),
-    };
+export async function folhaCompleta(req, res) {
+  try {
+    const ref = new Date();
+    const folks = await rh.listFuncionariosComSalario();
+    const holerites = [];
+    let totalBruto = 0;
+    let totalDesc = 0;
+    let totalLiq = 0;
+    let totalFGTS = 0;
+    for (const f of folks) {
+      const h = montarHolerite(f, ref);
+      holerites.push(holeritePublico(h));
+      totalBruto += Number(h.totalBruto);
+      totalDesc += Number(h.totalDescontos);
+      totalLiq += Number(h.totalLiquido);
+      totalFGTS += h.__fgts;
+    }
+    const custoTotalEmpresa = totalBruto + totalFGTS;
+    res.json({
+      mesReferencia: ref.getMonth() + 1,
+      anoReferencia: ref.getFullYear(),
+      totalFuncionarios: folks.length,
+      resumo: {
+        totalBruto: fmt(totalBruto),
+        totalDescontos: fmt(totalDesc),
+        totalLiquido: fmt(totalLiq),
+        totalFGTS: fmt(totalFGTS),
+        custoTotalEmpresa: fmt(custoTotalEmpresa),
+      },
+      holerites,
+    });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
 }
