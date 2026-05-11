@@ -77,6 +77,25 @@ const pgStmts = [
     treinamento_id INT NOT NULL REFERENCES treinamentos(id) ON DELETE CASCADE,
     PRIMARY KEY (funcionario_id, treinamento_id)
   )`,
+
+  `CREATE TABLE IF NOT EXISTS vagas (
+    id SERIAL PRIMARY KEY,
+    titulo VARCHAR(120) NOT NULL,
+    departamento_id INT NOT NULL REFERENCES departamentos(id),
+    descricao TEXT NOT NULL,
+    status VARCHAR(24) DEFAULT 'ABERTA',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS candidatos (
+    id SERIAL PRIMARY KEY,
+    vaga_id INT NOT NULL REFERENCES vagas(id) ON DELETE CASCADE,
+    nome VARCHAR(180) NOT NULL,
+    email VARCHAR(180) NOT NULL,
+    telefone VARCHAR(32),
+    link_curriculo VARCHAR(255),
+    fase VARCHAR(32) DEFAULT 'TRIAGEM',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`
 ];
 
 async function runPg() {
@@ -169,6 +188,27 @@ const mysqlStmts = [
     FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id) ON DELETE CASCADE,
     FOREIGN KEY (treinamento_id) REFERENCES treinamentos(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS vagas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    titulo VARCHAR(120) NOT NULL,
+    departamento_id INT NOT NULL,
+    descricao TEXT NOT NULL,
+    status VARCHAR(24) DEFAULT 'ABERTA',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (departamento_id) REFERENCES departamentos(id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  `CREATE TABLE IF NOT EXISTS candidatos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vaga_id INT NOT NULL,
+    nome VARCHAR(180) NOT NULL,
+    email VARCHAR(180) NOT NULL,
+    telefone VARCHAR(32),
+    link_curriculo VARCHAR(255),
+    fase VARCHAR(32) DEFAULT 'TRIAGEM',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vaga_id) REFERENCES vagas(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 ];
 
 async function runMysql() {

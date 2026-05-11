@@ -314,3 +314,56 @@ export async function folhaCompleta(req, res) {
     res.status(500).json({ erro: e.message });
   }
 }
+
+export async function vagasList(req, res) {
+  try {
+    res.json(await rh.listVagas());
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
+
+export async function vagasPost(req, res) {
+  try {
+    if (!req.body.titulo || !req.body.departamentoId || !req.body.descricao) {
+      return res.status(400).json({ erro: 'Dados incompletos para a vaga' });
+    }
+    await rh.createVaga(req.body);
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
+
+export async function candidatosList(req, res) {
+  try {
+    const vagaId = req.params.vagaId;
+    res.json(await rh.listCandidatos(vagaId));
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
+
+export async function candidatosPost(req, res) {
+  try {
+    if (!req.body.vagaId || !req.body.nome || !req.body.email) {
+      return res.status(400).json({ erro: 'Dados incompletos para o candidato' });
+    }
+    await rh.createCandidato(req.body);
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}
+
+export async function candidatosPatchFase(req, res) {
+  try {
+    const { fase } = req.body;
+    if (!fase) return res.status(400).json({ erro: 'Fase não informada' });
+    
+    await rh.updateFaseCandidato(req.params.id, fase);
+    res.json({ ok: true, faseAtualizada: fase });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+}

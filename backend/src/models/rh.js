@@ -295,3 +295,45 @@ export async function listFuncionariosComSalario() {
      WHERE status IN ('ATIVO','FERIAS')`
   );
 }
+
+export async function listVagas() {
+  const rows = await all(
+    `SELECT v.id, v.titulo, v.descricao, v.status, d.nome AS departamento_nome 
+     FROM vagas v
+     JOIN departamentos d ON v.departamento_id = d.id
+     ORDER BY v.id DESC`
+  );
+  return rows.map(r => ({
+    id: r.id,
+    titulo: r.titulo,
+    descricao: r.descricao,
+    status: r.status,
+    departamento: { nome: r.departamento_nome }
+  }));
+}
+
+export async function createVaga(body) {
+  await run(
+    `INSERT INTO vagas (titulo, departamento_id, descricao) VALUES (?, ?, ?)`,
+    [body.titulo, body.departamentoId, body.descricao]
+  );
+}
+
+export async function createCandidato(body) {
+  await run(
+    `INSERT INTO candidatos (vaga_id, nome, email, telefone, link_curriculo) VALUES (?, ?, ?, ?, ?)`,
+    [body.vagaId, body.nome, body.email, body.telefone ?? null, body.linkCurriculo ?? null]
+  );
+}
+
+export async function listCandidatos(vagaId) {
+  return all(
+    `SELECT id, vaga_id AS vagaId, nome, email, telefone, link_curriculo AS linkCurriculo, fase 
+     FROM candidatos WHERE vaga_id = ? ORDER BY id DESC`,
+    [vagaId]
+  );
+}
+
+export async function updateFaseCandidato(id, fase) {
+  await run(`UPDATE candidatos SET fase = ? WHERE id = ?`, [fase, id]);
+}

@@ -28,5 +28,10 @@ r.post('/treinamentos', c.treinamentosPost);
 r.post('/treinamentos/inscrever', c.treinamentosInscrever);
 r.get('/folha', c.folhaCompleta);
 r.get('/folha/:id', c.folhaUm);
+r.get('/vagas', c.vagasList);
+r.post('/vagas', c.vagasPost);
+r.get('/vagas/:vagaId/candidatos', c.candidatosList);
+r.post('/candidatos', c.candidatosPost);
+r.patch('/candidatos/:id/fase', c.candidatosPatchFase);
 
 export default r;
