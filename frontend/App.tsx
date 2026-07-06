@@ -26,9 +26,11 @@ function AppShell() {
   const [funcionarios, setFuncionarios] = useState<FuncionarioView[]>([]);
   const [metricas, setMetricas] = useState<MetricasDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState('');
 
   const refreshDados = useCallback(async () => {
     setLoading(true);
+    setErro('');
     try {
       const [dash, raw] = await Promise.all([
         apiFetch<MetricasDashboard>('/rh/dashboard'),
@@ -36,7 +38,8 @@ function AppShell() {
       ]);
       setMetricas(dash);
       setFuncionarios(raw.map(mapFuncionarioApi));
-    } catch {
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : 'Nao foi possivel carregar os dados.');
       setMetricas(null);
       setFuncionarios([]);
     } finally {
@@ -51,6 +54,22 @@ function AppShell() {
   const renderPage = () => {
     if (loading) {
       return <p className="text-slate-500">Carregando...</p>;
+    }
+
+    if (erro) {
+      return (
+        <div className="max-w-lg rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+          <p className="font-semibold">Nao foi possivel carregar o painel.</p>
+          <p className="mt-1">{erro}</p>
+          <button
+            type="button"
+            onClick={refreshDados}
+            className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      );
     }
 
     switch (page) {

@@ -1,15 +1,23 @@
 import bcrypt from 'bcryptjs';
+import { getEnv } from '../config/env.js';
 import * as authModel from '../models/auth.js';
 import { signToken } from '../middleware/auth.js';
+import { requiredString, validEmail, validate } from '../utils/validation.js';
 
 export async function login(req, res) {
   try {
     const { email, senha } = req.body ?? {};
-    if (!email || !senha) return res.status(400).json({ erro: 'E-mail e senha obrigatórios' });
+    const errors = validate([
+      validEmail(email),
+      requiredString(senha, 'Senha', 120),
+    ]);
+    if (errors) return res.status(400).json({ erro: errors[0], detalhes: errors });
+
     const u = await authModel.findUserByEmail(String(email).trim().toLowerCase());
-    if (!u || !(await bcrypt.compare(senha, u.senha_hash))) {
-      return res.status(401).json({ erro: 'Credenciais inválidas' });
+    if (!u || !(await bcrypt.compare(String(senha), u.senha_hash))) {
+      return res.status(401).json({ erro: 'Credenciais invalidas' });
     }
+
     const token = signToken({ sub: u.id, email: u.email });
     res.json({
       token,
@@ -22,20 +30,26 @@ export async function login(req, res) {
 
 export async function registrar(req, res) {
   try {
-    const allowRegistration = process.env.ALLOW_ADMIN_REGISTRATION === 'true';
-    if (!allowRegistration && (await authModel.countUsers()) > 0) {
+    if (!getEnv().allowAdminRegistration && (await authModel.countUsers()) > 0) {
       return res.status(403).json({
         erro: 'Cadastro de administradores desabilitado. Use o administrador inicial ou habilite ALLOW_ADMIN_REGISTRATION=true.',
       });
     }
 
     const { nome, email, senha } = req.body ?? {};
-    if (!nome || !email || !senha) return res.status(400).json({ erro: 'Preencha todos os campos' });
-    if (String(senha).length < 6) return res.status(400).json({ erro: 'Senha mínimo 6 caracteres' });
+    const errors = validate([
+      requiredString(nome, 'Nome', 120),
+      validEmail(email),
+      requiredString(senha, 'Senha', 120),
+      String(senha ?? '').length < 6 ? 'Senha deve ter no minimo 6 caracteres.' : '',
+    ]);
+    if (errors) return res.status(400).json({ erro: errors[0], detalhes: errors });
+
     const em = String(email).trim().toLowerCase();
     if (await authModel.findUserByEmail(em)) {
-      return res.status(409).json({ erro: 'E-mail já cadastrado' });
+      return res.status(409).json({ erro: 'E-mail ja cadastrado' });
     }
+
     const senhaHash = await bcrypt.hash(String(senha), 10);
     await authModel.createUser({ nome: String(nome).trim(), email: em, senhaHash });
     res.status(201).json({ ok: true });

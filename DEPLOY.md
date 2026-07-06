@@ -9,6 +9,8 @@ PORT=3333
 JWT_SECRET=gere-um-segredo-longo
 ALLOW_ADMIN_REGISTRATION=false
 CORS_ORIGIN=https://seu-frontend.com
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX=300
 DB_CLIENT=postgres
 PG_HOST=host-do-banco
 PG_PORT=5432
@@ -58,5 +60,6 @@ Pasta publicada do frontend: `frontend/dist`.
 - Trocar `SEED_ADMIN_PASSWORD`.
 - Manter `ALLOW_ADMIN_REGISTRATION=false`.
 - Apontar `CORS_ORIGIN` para o dominio real do frontend.
+- Ajustar `RATE_LIMIT_MAX` conforme o volume real de usuarios.
 - Apontar `VITE_API_URL` para a URL publica da API.
 - Confirmar backup do banco.

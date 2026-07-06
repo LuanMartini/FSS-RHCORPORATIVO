@@ -7,20 +7,27 @@ function getToken(): string | null {
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers ?? {}),
     },
-    ...options,
   });
 
   const text = await res.text();
-  const data = (text ? JSON.parse(text) : {}) as unknown;
+  let data: unknown = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { erro: 'Resposta invalida da API' };
+  }
 
   if (!res.ok) {
     const err = data as { erro?: string; message?: string };
-    throw new Error(err.erro || err.message || 'Erro na requisição');
+    throw new Error(err.erro || err.message || 'Erro na requisicao');
   }
+
   return data as T;
 }
 

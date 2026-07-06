@@ -6,6 +6,7 @@ Sistema de RH corporativo com autenticação, dashboard, funcionários, admissã
 
 - Frontend: React, TypeScript, Vite e Tailwind CSS.
 - Backend: Node.js, Express, JWT, bcrypt e banco PostgreSQL ou MySQL.
+- Qualidade: lint, build, testes automatizados do backend e CI via GitHub Actions.
 
 ## Como rodar
 
@@ -50,6 +51,7 @@ Também são criados departamentos, cargos, funcionários, benefícios, treiname
 
 ```bash
 npm run check
+npm run test
 npm run build
 npm run lint
 npm run start:backend

@@ -10,6 +10,7 @@
     "start:backend": "npm --prefix backend start",
     "build": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint",
-    "check": "npm run lint && npm run build"
+    "test": "npm --prefix backend test",
+    "check": "npm run lint && npm run test && npm run build"
   }
 }

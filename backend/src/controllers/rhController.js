@@ -1,5 +1,21 @@
 import * as rh from '../models/rh.js';
 import { montarHolerite, holeritePublico, fmt, calcularFGTS } from '../services/payrollService.js';
+import {
+  optionalDate,
+  positiveInteger,
+  positiveNumber,
+  requiredString,
+  validEmail,
+  validate,
+} from '../utils/validation.js';
+
+const tiposPonto = new Set(['ENTRADA', 'SAIDA', 'INTERVALO_INICIO', 'INTERVALO_FIM']);
+
+function validationResponse(res, errors) {
+  if (!errors) return false;
+  res.status(400).json({ erro: errors[0], detalhes: errors });
+  return true;
+}
 
 function horaBr(dt) {
   const d = dt instanceof Date ? dt : new Date(dt);
@@ -101,15 +117,28 @@ export async function admitir(req, res) {
     const b = req.body ?? {};
     const cargoId = Number(b.cargoId);
     const deptId = b.departamentoId != null ? Number(b.departamentoId) : undefined;
-    if (!b.nome || !b.cpf || !b.email || !cargoId || !b.salario) {
-      return res.status(400).json({ erro: 'Dados incompletos' });
-    }
+    const cpf = String(b.cpf ?? '').replace(/\D/g, '');
+    if (
+      validationResponse(
+        res,
+        validate([
+          requiredString(b.nome, 'Nome', 180),
+          cpf.length !== 11 ? 'CPF deve conter 11 digitos.' : '',
+          validEmail(b.email),
+          positiveInteger(cargoId, 'Cargo'),
+          deptId != null ? positiveInteger(deptId, 'Departamento') : '',
+          positiveNumber(b.salario, 'Salario'),
+          optionalDate(b.dataNascimento, 'Data de nascimento'),
+        ])
+      )
+    ) return;
+
     const cargos = await rh.listCargos();
     const cg = cargos.find((c) => c.id === cargoId);
     if (!cg) return res.status(400).json({ erro: 'Cargo inválido' });
     await rh.admitir({
       nome: String(b.nome).trim(),
-      cpf: String(b.cpf).replace(/\D/g, ''),
+      cpf,
       email: String(b.email).trim(),
       cargoId,
       departamentoId: deptId ?? cg.departamentoId,
@@ -129,6 +158,16 @@ export async function admitir(req, res) {
 export async function pontoPost(req, res) {
   try {
     const { funcionarioId, tipo } = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          positiveInteger(funcionarioId, 'Funcionario'),
+          !tiposPonto.has(String(tipo)) ? 'Tipo de ponto invalido.' : '',
+        ])
+      )
+    ) return;
+
     const row = await rh.insertPonto(Number(funcionarioId), String(tipo));
     res.status(201).json({
       tipo: row.tipo,
@@ -159,6 +198,20 @@ export async function feriasList(req, res) {
 
 export async function feriasPost(req, res) {
   try {
+    const b = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          positiveInteger(b.funcionarioId, 'Funcionario'),
+          requiredString(b.dataInicio, 'Data de inicio', 10),
+          requiredString(b.dataFim, 'Data de fim', 10),
+          optionalDate(b.dataInicio, 'Data de inicio'),
+          optionalDate(b.dataFim, 'Data de fim'),
+        ])
+      )
+    ) return;
+
     await rh.createFeria(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -207,6 +260,19 @@ export async function advertenciasList(req, res) {
 
 export async function advertenciasPost(req, res) {
   try {
+    const b = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          positiveInteger(b.funcionarioId, 'Funcionario'),
+          requiredString(b.tipo, 'Tipo', 32),
+          requiredString(b.descricao, 'Descricao', 1000),
+          optionalDate(b.dataOcorrencia, 'Data da ocorrencia'),
+        ])
+      )
+    ) return;
+
     await rh.createAdvertencia(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -224,6 +290,18 @@ export async function beneficiosList(req, res) {
 
 export async function beneficiosPost(req, res) {
   try {
+    const b = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          requiredString(b.nome, 'Nome', 120),
+          requiredString(b.tipo, 'Tipo', 64),
+          positiveNumber(b.valorMensal, 'Valor mensal'),
+        ])
+      )
+    ) return;
+
     await rh.createBeneficio(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -234,6 +312,16 @@ export async function beneficiosPost(req, res) {
 export async function beneficiosVincular(req, res) {
   try {
     const { funcionarioId, beneficioId } = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          positiveInteger(funcionarioId, 'Funcionario'),
+          positiveInteger(beneficioId, 'Beneficio'),
+        ])
+      )
+    ) return;
+
     await rh.vincularBeneficio(Number(funcionarioId), Number(beneficioId));
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -251,6 +339,18 @@ export async function treinamentosList(req, res) {
 
 export async function treinamentosPost(req, res) {
   try {
+    const b = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          requiredString(b.nome, 'Nome', 180),
+          positiveInteger(b.cargaHoraria, 'Carga horaria'),
+          requiredString(b.modalidade, 'Modalidade', 32),
+        ])
+      )
+    ) return;
+
     await rh.createTreinamento(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -261,6 +361,16 @@ export async function treinamentosPost(req, res) {
 export async function treinamentosInscrever(req, res) {
   try {
     const { funcionarioId, treinamentoId } = req.body ?? {};
+    if (
+      validationResponse(
+        res,
+        validate([
+          positiveInteger(funcionarioId, 'Funcionario'),
+          positiveInteger(treinamentoId, 'Treinamento'),
+        ])
+      )
+    ) return;
+
     await rh.inscreverTreinamento(Number(funcionarioId), Number(treinamentoId));
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -325,9 +435,17 @@ export async function vagasList(req, res) {
 
 export async function vagasPost(req, res) {
   try {
-    if (!req.body.titulo || !req.body.departamentoId || !req.body.descricao) {
-      return res.status(400).json({ erro: 'Dados incompletos para a vaga' });
-    }
+    if (
+      validationResponse(
+        res,
+        validate([
+          requiredString(req.body?.titulo, 'Titulo', 120),
+          positiveInteger(req.body?.departamentoId, 'Departamento'),
+          requiredString(req.body?.descricao, 'Descricao', 2000),
+        ])
+      )
+    ) return;
+
     await rh.createVaga(req.body);
     res.status(201).json({ ok: true });
   } catch (e) {
@@ -346,9 +464,17 @@ export async function candidatosList(req, res) {
 
 export async function candidatosPost(req, res) {
   try {
-    if (!req.body.vagaId || !req.body.nome || !req.body.email) {
-      return res.status(400).json({ erro: 'Dados incompletos para o candidato' });
-    }
+    if (
+      validationResponse(
+        res,
+        validate([
+          positiveInteger(req.body?.vagaId, 'Vaga'),
+          requiredString(req.body?.nome, 'Nome', 180),
+          validEmail(req.body?.email),
+        ])
+      )
+    ) return;
+
     await rh.createCandidato(req.body);
     res.status(201).json({ ok: true });
   } catch (e) {
