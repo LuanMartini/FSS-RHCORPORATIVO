@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { all, execRaw, isMysql } from './client.js';
+import { all, execRaw, isMysql, run } from './client.js';
 
 const pgStmts = [
   `CREATE TABLE IF NOT EXISTS usuarios (
@@ -221,35 +221,184 @@ export async function ensureSchema() {
 }
 
 export async function seedIfEmpty() {
-  const u = await all('SELECT COUNT(*) AS c FROM usuarios');
-  const n = Number(u[0]?.c ?? u[0]?.['COUNT(*)'] ?? 0);
-  
-  if (n > 0) return;
-
-  const hash = await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || 'admin123', 10);
-  const email = process.env.SEED_ADMIN_EMAIL || 'admin@empresa.com';
-
-  // Inserindo o Usuário Admin
-  await execRaw(
-    `INSERT INTO usuarios (nome, email, senha_hash) VALUES ('Administrador', '${email}', '${hash}')`
-  );
-
-  // Inserindo Departamentos
-  await execRaw(
-    `INSERT INTO departamentos (nome, sigla) VALUES ('Recursos Humanos', 'RH'), ('Tecnologia', 'TI')`
-  );
-
-  const depts = await all('SELECT id, sigla FROM departamentos ORDER BY id');
-  const rh = depts.find((d) => d.sigla === 'RH')?.id;
-  const ti = depts.find((d) => d.sigla === 'TI')?.id;
-
-  if (rh && ti) {
-    // Inserindo Cargos
-    await execRaw(
-      `INSERT INTO cargos (nome, departamento_id, salario_base) VALUES 
-      ('Analista de RH', ${rh}, 4200.00), 
-      ('Desenvolvedor', ${ti}, 8500.00), 
-      ('Gerente de TI', ${ti}, 12000.00)`
+  if ((await countTable('usuarios')) === 0) {
+    const hash = await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || 'admin123', 10);
+    const email = process.env.SEED_ADMIN_EMAIL || 'admin@empresa.com';
+    await run(
+      'INSERT INTO usuarios (nome, email, senha_hash) VALUES (?, ?, ?)',
+      ['Administrador', email, hash]
     );
   }
+
+  if ((await countTable('departamentos')) === 0) {
+    await run(
+      `INSERT INTO departamentos (nome, sigla) VALUES
+       (?, ?), (?, ?), (?, ?)`,
+      ['Recursos Humanos', 'RH', 'Tecnologia', 'TI', 'Financeiro', 'FIN']
+    );
+  }
+
+  await ensureDepartamento('Recursos Humanos', 'RH');
+  await ensureDepartamento('Tecnologia', 'TI');
+  await ensureDepartamento('Financeiro', 'FIN');
+
+  if ((await countTable('cargos')) === 0) {
+    const { rh, ti, fin } = await getDepartamentoIds();
+    await run(
+      `INSERT INTO cargos (nome, departamento_id, salario_base) VALUES
+       (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
+      [
+        'Analista de RH',
+        rh,
+        4200.0,
+        'Desenvolvedor',
+        ti,
+        8500.0,
+        'Gerente de TI',
+        ti,
+        12000.0,
+        'Analista Financeiro',
+        fin,
+        6100.0,
+      ]
+    );
+  }
+
+  const { rh, ti, fin } = await getDepartamentoIds();
+  await ensureCargo('Analista de RH', rh, 4200.0);
+  await ensureCargo('Desenvolvedor', ti, 8500.0);
+  await ensureCargo('Gerente de TI', ti, 12000.0);
+  await ensureCargo('Analista Financeiro', fin, 6100.0);
+
+  if ((await countTable('funcionarios')) === 0) {
+    const cargos = await all(
+      `SELECT c.id, c.nome, c.departamento_id, c.salario_base
+       FROM cargos c ORDER BY c.id`
+    );
+    const porNome = (nome) => cargos.find((c) => c.nome === nome) ?? cargos[0];
+    const amanda = porNome('Analista de RH');
+    const bruno = porNome('Desenvolvedor');
+    const clara = porNome('Analista Financeiro');
+
+    await run(
+      `INSERT INTO funcionarios
+       (nome, cpf, email, cargo_id, departamento_id, salario, telefone, data_nascimento, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ATIVO'),
+              (?, ?, ?, ?, ?, ?, ?, ?, 'ATIVO'),
+              (?, ?, ?, ?, ?, ?, ?, ?, 'FERIAS')`,
+      [
+        'Amanda Souza',
+        '12345678901',
+        'amanda.souza@empresa.com',
+        amanda.id,
+        amanda.departamento_id,
+        amanda.salario_base,
+        '(11) 98888-1001',
+        '1991-04-18',
+        'Bruno Lima',
+        '23456789012',
+        'bruno.lima@empresa.com',
+        bruno.id,
+        bruno.departamento_id,
+        bruno.salario_base,
+        '(11) 97777-2002',
+        '1988-09-03',
+        'Clara Mendes',
+        '34567890123',
+        'clara.mendes@empresa.com',
+        clara.id,
+        clara.departamento_id,
+        clara.salario_base,
+        '(11) 96666-3003',
+        '1994-01-27',
+      ]
+    );
+  }
+
+  if ((await countTable('beneficios')) === 0) {
+    await run(
+      `INSERT INTO beneficios (nome, tipo, valor_mensal) VALUES
+       (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
+      [
+        'Vale Refeicao',
+        'VR',
+        750.0,
+        'Vale Transporte',
+        'VT',
+        320.0,
+        'Plano de Saude',
+        'SAUDE',
+        590.0,
+      ]
+    );
+  }
+
+  if ((await countTable('treinamentos')) === 0) {
+    await run(
+      `INSERT INTO treinamentos (nome, carga_horaria, modalidade, descricao) VALUES
+       (?, ?, ?, ?), (?, ?, ?, ?)`,
+      [
+        'Integracao corporativa',
+        8,
+        'ONLINE',
+        'Onboarding para novos colaboradores',
+        'LGPD aplicada ao RH',
+        6,
+        'HIBRIDO',
+        'Boas praticas para tratamento de dados pessoais',
+      ]
+    );
+  }
+
+  if ((await countTable('vagas')) === 0) {
+    const { rh, ti } = await getDepartamentoIds();
+    await run(
+      `INSERT INTO vagas (titulo, departamento_id, descricao, status) VALUES
+       (?, ?, ?, ?), (?, ?, ?, ?)`,
+      [
+        'Assistente de RH',
+        rh,
+        'Apoio em admissoes, ferias, ponto e atendimento interno.',
+        'ABERTA',
+        'Desenvolvedor Front-end',
+        ti,
+        'Construcao de interfaces internas para operacoes corporativas.',
+        'ABERTA',
+      ]
+    );
+  }
+}
+
+async function countTable(table) {
+  const rows = await all(`SELECT COUNT(*) AS c FROM ${table}`);
+  return Number(rows[0]?.c ?? rows[0]?.['COUNT(*)'] ?? 0);
+}
+
+async function getDepartamentoIds() {
+  const depts = await all('SELECT id, sigla FROM departamentos ORDER BY id');
+  const bySigla = (sigla) => depts.find((d) => d.sigla === sigla)?.id ?? depts[0]?.id;
+  return {
+    rh: bySigla('RH'),
+    ti: bySigla('TI'),
+    fin: bySigla('FIN'),
+  };
+}
+
+async function ensureDepartamento(nome, sigla) {
+  const rows = await all('SELECT id FROM departamentos WHERE sigla = ? LIMIT 1', [sigla]);
+  if (rows.length > 0) return rows[0].id;
+  await run('INSERT INTO departamentos (nome, sigla) VALUES (?, ?)', [nome, sigla]);
+  const created = await all('SELECT id FROM departamentos WHERE sigla = ? LIMIT 1', [sigla]);
+  return created[0]?.id;
+}
+
+async function ensureCargo(nome, departamentoId, salarioBase) {
+  const rows = await all('SELECT id FROM cargos WHERE nome = ? LIMIT 1', [nome]);
+  if (rows.length > 0) return rows[0].id;
+  await run(
+    'INSERT INTO cargos (nome, departamento_id, salario_base) VALUES (?, ?, ?)',
+    [nome, departamentoId, salarioBase]
+  );
+  const created = await all('SELECT id FROM cargos WHERE nome = ? LIMIT 1', [nome]);
+  return created[0]?.id;
 }

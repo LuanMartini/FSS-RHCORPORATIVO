@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import { apiFetch } from './services/api';
 import Sidebar from './components/Sidebar';
 
@@ -20,6 +21,7 @@ import type { Page } from './types/page';
 import { mapFuncionarioApi, type FuncionarioView } from './utils/funcionario';
 
 function AppShell() {
+  const { user, logout } = useAuth();
   const [page, setPage] = useState<Page>('dashboard');
   const [funcionarios, setFuncionarios] = useState<FuncionarioView[]>([]);
   const [metricas, setMetricas] = useState<MetricasDashboard | null>(null);
@@ -91,10 +93,10 @@ function AppShell() {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <Sidebar page={page} setPage={setPage} />
+    <div className="flex min-h-screen flex-col bg-slate-50 lg:flex-row">
+      <Sidebar page={page} setPage={setPage} userName={user?.nome} onLogout={logout} />
 
-      <main className="ml-[220px] flex-1 px-12 py-10">
+      <main className="flex-1 px-4 py-6 sm:px-6 lg:ml-[220px] lg:px-12 lg:py-10">
         {renderPage()}
       </main>
     </div>
@@ -104,10 +106,11 @@ function AppShell() {
 function AuthGate() {
   const { token } = useAuth();
   const [authScreen, setAuthScreen] = useState<'login' | 'register'>('login');
+  const canRegister = import.meta.env.VITE_ADMIN_REGISTRATION_ENABLED === 'true';
 
   if (!token) {
-    return authScreen === 'login'
-      ? <Login onSwitch={() => setAuthScreen('register')} />
+    return authScreen === 'login' || !canRegister
+      ? <Login canRegister={canRegister} onSwitch={() => setAuthScreen('register')} />
       : <Register onSwitch={() => setAuthScreen('login')} />;
   }
 

@@ -1,5 +1,5 @@
-import { useState, FormEvent } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useState, type FormEvent } from 'react';
+import { useAuth } from '../context/useAuth';
 import { apiFetch } from '../services/api';
 
 interface Props {
@@ -23,26 +23,17 @@ export default function Register({ onSwitch }: Props) {
         body: JSON.stringify({ email: form.email, senha: form.senha }),
       });
       login(data.token, data.usuario);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao criar conta');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen grid grid-cols-2">
+    <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
       {/* Painel esquerdo */}
-      <div className="relative bg-[#0f2340] flex flex-col justify-center items-start px-16 overflow-hidden">
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              'radial-gradient(ellipse at 20% 80%, rgba(200,151,58,0.18) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(200,151,58,0.08) 0%, transparent 50%)',
-          }}
-        />
-        <div className="absolute -bottom-16 -right-16 w-80 h-80 rounded-full border border-[#c8973a]/20 pointer-events-none" />
-        <div className="absolute -bottom-4 -right-4 w-56 h-56 rounded-full border border-[#c8973a]/10 pointer-events-none" />
+      <div className="relative flex flex-col items-start justify-center overflow-hidden bg-[#0f2340] px-6 py-10 lg:px-16">
 
         <div className="relative z-10">
           <div className="font-serif text-3xl text-white mb-14 tracking-tight">
@@ -58,7 +49,7 @@ export default function Register({ onSwitch }: Props) {
       </div>
 
       {/* Formulário */}
-      <div className="bg-white flex flex-col justify-center items-center px-16">
+      <div className="flex flex-col items-center justify-center bg-white px-6 py-10 lg:px-16">
         <div className="w-full max-w-sm">
           <h2 className="font-serif text-4xl text-[#0f2340] mb-2">Novo administrador</h2>
           <p className="text-sm text-slate-400 mb-9">Preencha os dados para criar sua conta</p>

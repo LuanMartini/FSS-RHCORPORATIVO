@@ -40,7 +40,7 @@ export default function Holerite({ funcionarios }: Props) {
     <div className="max-w-2xl space-y-6">
       <h2 className="font-serif text-2xl text-[#0f2340]">Holerite</h2>
 
-      <div className="flex flex-wrap gap-3 items-end bg-white border border-slate-200 rounded-xl p-4">
+      <div className="flex flex-wrap gap-3 items-end bg-white border border-slate-200 rounded-lg p-4">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">Funcionário</label>
           <select
@@ -67,7 +67,7 @@ export default function Holerite({ funcionarios }: Props) {
       {erro && <p className="text-red-600 text-sm">{erro}</p>}
 
       {h && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-2 text-sm">
+        <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-2 text-sm">
           <p><strong>Referência:</strong> {h.mesReferencia}/{h.anoReferencia}</p>
           <p><strong>Nome:</strong> {h.funcionario.nome}</p>
           <p><strong>CPF:</strong> {h.funcionario.cpf}</p>

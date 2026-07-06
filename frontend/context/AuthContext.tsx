@@ -1,18 +1,7 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
-
-interface User {
-  nome: string;
-  email: string;
-}
-
-interface AuthContextType {
-  token: string | null;
-  user: User | null;
-  login: (token: string, user: User) => void;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import { AuthContext } from './authState';
+import type { User } from './authState';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
@@ -39,10 +28,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

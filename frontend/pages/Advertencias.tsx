@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { apiFetch } from '../services/api';
 import type { FuncionarioView } from '../utils/funcionario';
 
@@ -76,7 +76,7 @@ export default function Advertencias({ funcionarios, onRefresh }: Props) {
       <h2 className="font-serif text-2xl text-[#0f2340]">Advertências</h2>
       {erro && <p className="text-red-600 text-sm">{erro}</p>}
 
-      <form onSubmit={registrar} className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
+      <form onSubmit={registrar} className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
         <h3 className="font-semibold">Registrar</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <select
@@ -118,7 +118,7 @@ export default function Advertencias({ funcionarios, onRefresh }: Props) {
         </button>
       </form>
 
-      <table className="w-full text-sm bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden">
         <thead className="bg-slate-50">
           <tr>
             <th className="text-left px-4 py-2">Funcionário</th>

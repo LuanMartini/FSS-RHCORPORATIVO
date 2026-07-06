@@ -8,8 +8,9 @@ import rhRoutes from './routes/rhRoutes.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3333);
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 
 app.use(authRoutes);

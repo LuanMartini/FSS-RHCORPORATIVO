@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { apiFetch } from '../services/api';
 import type { FuncionarioView } from '../utils/funcionario';
 
@@ -91,7 +91,7 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
       <h2 className="font-serif text-2xl text-[#0f2340]">Férias</h2>
       {erro && <p className="text-red-600 text-sm">{erro}</p>}
 
-      <form onSubmit={solicitar} className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
+      <form onSubmit={solicitar} className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
         <h3 className="font-semibold text-slate-800">Nova solicitação</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <select
@@ -131,7 +131,7 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
         </button>
       </form>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>

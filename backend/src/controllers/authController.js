@@ -22,6 +22,13 @@ export async function login(req, res) {
 
 export async function registrar(req, res) {
   try {
+    const allowRegistration = process.env.ALLOW_ADMIN_REGISTRATION === 'true';
+    if (!allowRegistration && (await authModel.countUsers()) > 0) {
+      return res.status(403).json({
+        erro: 'Cadastro de administradores desabilitado. Use o administrador inicial ou habilite ALLOW_ADMIN_REGISTRATION=true.',
+      });
+    }
+
     const { nome, email, senha } = req.body ?? {};
     if (!nome || !email || !senha) return res.status(400).json({ erro: 'Preencha todos os campos' });
     if (String(senha).length < 6) return res.status(400).json({ erro: 'Senha mínimo 6 caracteres' });

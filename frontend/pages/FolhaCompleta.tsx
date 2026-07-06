@@ -44,7 +44,7 @@ export default function FolhaCompleta() {
       <p className="text-slate-600 text-sm">
         Referência: {data.mesReferencia}/{data.anoReferencia} — {data.totalFuncionarios} funcionário(s) ativo(s)
       </p>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
         <div className="bg-white border border-slate-200 rounded-lg p-4">
           <p className="text-xs text-slate-500">Total bruto</p>
           <p className="text-lg font-semibold">R$ {data.resumo.totalBruto}</p>

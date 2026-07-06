@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, type ChangeEvent, type FormEvent } from 'react';
 import { apiFetch } from '../services/api';
 
 interface Cargo {
@@ -120,7 +120,7 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4 bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+      <form onSubmit={handleSubmit} className="space-y-4 bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
         <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Nome completo</label>
           <input

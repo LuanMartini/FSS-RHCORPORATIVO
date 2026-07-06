@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { apiFetch } from '../services/api';
 import type { FuncionarioView } from '../utils/funcionario';
 
@@ -81,7 +81,7 @@ export default function Beneficios({ funcionarios, onRefresh }: Props) {
       <h2 className="font-serif text-2xl text-[#0f2340]">Benefícios</h2>
       {erro && <p className="text-red-600 text-sm">{erro}</p>}
 
-      <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
+      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
         <h3 className="font-semibold">Cadastrar benefício</h3>
         <form onSubmit={criar} className="flex flex-wrap gap-2 items-end">
           <input
@@ -110,7 +110,7 @@ export default function Beneficios({ funcionarios, onRefresh }: Props) {
         </form>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
+      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
         <h3 className="font-semibold">Vincular a funcionário</h3>
         <form onSubmit={vincular} className="flex flex-wrap gap-2 items-end">
           <select
@@ -139,7 +139,7 @@ export default function Beneficios({ funcionarios, onRefresh }: Props) {
         </form>
       </div>
 
-      <table className="w-full text-sm bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden">
         <thead className="bg-slate-50">
           <tr>
             <th className="text-left px-4 py-2">Nome</th>

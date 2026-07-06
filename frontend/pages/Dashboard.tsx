@@ -1,4 +1,4 @@
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import type { Page } from '../types/page';
 import type { FuncionarioView } from '../utils/funcionario';
 
@@ -79,9 +79,9 @@ export default function Dashboard({ metricas, funcionarios, setPage }: Props) {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-5 mb-8">
+      <div className="grid grid-cols-1 gap-5 mb-8 sm:grid-cols-3">
         {stats.map(s => (
-          <div key={s.label} className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+          <div key={s.label} className="bg-white rounded-lg p-6 border border-slate-200 shadow-sm relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: s.accent }} />
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">{s.label}</p>
             <p className="font-serif text-5xl text-[#0f2340] tracking-tight leading-none">{s.value}</p>
@@ -89,7 +89,7 @@ export default function Dashboard({ metricas, funcionarios, setPage }: Props) {
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-6">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm mb-6">
         <div className="px-7 py-5 border-b border-slate-100">
           <h2 className="font-serif text-xl text-[#0f2340]">Ações rápidas</h2>
         </div>
@@ -113,7 +113,7 @@ export default function Dashboard({ metricas, funcionarios, setPage }: Props) {
       </div>
 
       {funcionarios.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
           <div className="px-7 py-5 border-b border-slate-100 flex items-center justify-between">
             <h2 className="font-serif text-xl text-[#0f2340]">Últimos admitidos</h2>
             <button
