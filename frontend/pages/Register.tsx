@@ -18,7 +18,7 @@ export default function Register({ onSwitch }: Props) {
     setLoading(true);
     try {
       await apiFetch('/registrar', { method: 'POST', body: JSON.stringify(form) });
-      const data = await apiFetch<{ token: string; usuario: { nome: string; email: string } }>('/login', {
+      const data = await apiFetch<{ token: string; usuario: { nome: string; email: string; perfil: string; permissoes: string[] } }>('/login', {
         method: 'POST',
         body: JSON.stringify({ email: form.email, senha: form.senha }),
       });

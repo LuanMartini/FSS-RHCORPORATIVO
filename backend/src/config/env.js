@@ -22,8 +22,13 @@ export function getEnv() {
     corsOrigins,
     isProduction,
     jwtSecret,
+    jwtIssuer: process.env.JWT_ISSUER || 'rhcorp-api',
+    jwtAudience: process.env.JWT_AUDIENCE || 'rhcorp-web',
+    jwtAccessTtl: process.env.JWT_ACCESS_TTL || '10m',
     port,
     rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 300),
     rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+    trustProxyHops: Number(process.env.TRUST_PROXY_HOPS || 0),
+    requireRedis: process.env.REQUIRE_REDIS === 'true' || isProduction,
   };
 }

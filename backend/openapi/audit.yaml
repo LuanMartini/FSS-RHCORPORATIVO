@@ -1,0 +1,54 @@
+openapi: 3.1.0
+info:
+  title: RHCorp Auditoria Imutável e People Analytics
+  version: 1.0.0
+servers:
+  - url: http://localhost:3333
+security:
+  - bearerAuth: []
+paths:
+  /auditoria/dashboard:
+    get:
+      summary: Retorna turnover, equidade anonimizada, demografia agregada e últimos eventos
+      parameters:
+        - in: query
+          name: meses
+          schema: { type: integer, minimum: 6, maximum: 36, default: 12 }
+      responses:
+        '200': { description: Dashboard executivo gerado }
+        '401': { description: Token ausente ou inválido }
+        '403': { description: Perfil diferente de ADMINISTRADOR/AUDITOR }
+  /auditoria/ledger:
+    get:
+      summary: Consulta metadados não sensíveis do ledger
+      parameters:
+        - in: query
+          name: limite
+          schema: { type: integer, minimum: 10, maximum: 100, default: 50 }
+      responses:
+        '200': { description: Eventos do mais recente ao mais antigo }
+  /auditoria/ledger/verificar:
+    post:
+      summary: Recalcula SHA-256/HMAC da cadeia e confere a âncora externa
+      responses:
+        '200':
+          description: Resultado da verificação integral
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, status, totalEntries, anchorStatus, verifiedAt]
+                properties:
+                  valid: { type: boolean }
+                  status: { type: string, enum: [INTEGRO, CORROMPIDO] }
+                  totalEntries: { type: integer }
+                  brokenAt: { type: [integer, 'null'] }
+                  reason: { type: [string, 'null'] }
+                  anchorStatus: { type: string }
+                  verifiedAt: { type: string, format: date-time }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

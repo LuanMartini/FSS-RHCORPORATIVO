@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/jornada/**/*.ts", "src/payroll/**/*.ts", "src/ats/**/*.ts", "src/performance/**/*.ts", "src/flexBenefits/**/*.ts", "src/lms/**/*.ts", "src/climate/**/*.ts", "src/audit/**/*.ts", "test/jornada*.test.ts", "test/payroll*.test.ts", "test/ats*.test.ts", "test/performance*.test.ts", "test/flexBenefits*.test.ts", "test/lms*.test.ts", "test/climate*.test.ts", "test/audit*.test.ts"]
+}

@@ -1,8 +1,21 @@
 import { all, run, isMysql } from '../db/client.js';
 
 export async function findUserByEmail(email) {
-  const rows = await all('SELECT id, nome, email, senha_hash FROM usuarios WHERE email = ?', [email]);
+  const rows = await all(
+    'SELECT id, nome, email, senha_hash, perfil, ativo, session_version FROM usuarios WHERE email = ?',
+    [email]
+  );
   return rows[0] ?? null;
+}
+
+export async function userPermissions(userId) {
+  const rows = await all(
+    `SELECT pp.permissao FROM usuarios u
+     JOIN perfis_permissoes pp ON pp.perfil=u.perfil
+     WHERE u.id=? ORDER BY pp.permissao`,
+    [userId]
+  );
+  return rows.map((row) => String(row.permissao));
 }
 
 export async function createUser({ nome, email, senhaHash }) {

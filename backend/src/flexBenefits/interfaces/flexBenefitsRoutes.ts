@@ -1,0 +1,12 @@
+import {Router} from 'express';
+import multer from 'multer';
+import {authMiddleware} from '../../middleware/auth.js';
+import {authorize,scopeOwnCollaborator} from '../../middleware/authorization.js';
+import * as controller from './flexBenefitsController.js';
+const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:1,fields:20}});
+const router=Router();router.use(authMiddleware);
+router.get('/dashboard',authorize('benefits.self','benefits.approve'),scopeOwnCollaborator('benefits.approve'),controller.dashboard);
+router.put('/carteiras/:carteiraId/distribuicao',authorize('benefits.self'),controller.distribute);
+router.post('/reembolsos',authorize('benefits.self'),upload.single('comprovante'),controller.reimburse);
+router.post('/reembolsos/:reembolsoId/decisao',authorize('benefits.approve'),controller.decide);
+export default router;

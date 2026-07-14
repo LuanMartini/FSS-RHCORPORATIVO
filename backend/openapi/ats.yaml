@@ -1,0 +1,122 @@
+openapi: 3.1.0
+info:
+  title: RHCorp ATS API
+  version: 1.0.0
+  description: ATS colaborativo com Kanban, CV parsing, chat, agenda e portal do candidato.
+servers:
+  - url: http://localhost:3333
+security:
+  - bearerAuth: []
+paths:
+  /ats/vagas:
+    get:
+      summary: Lista vagas visiveis conforme ACL do recrutador
+      responses:
+        '200': { description: Vagas e contadores }
+  /ats/vagas/{vagaId}/kanban:
+    get:
+      summary: Carrega snapshot consistente do Kanban
+      parameters: [{$ref: '#/components/parameters/VagaId'}]
+      responses:
+        '200': { description: Vaga, etapas e cards }
+        '403': { description: Sem permissao }
+  /ats/vagas/{vagaId}/curriculos:
+    post:
+      summary: Extrai PDF/DOCX, calcula match e cria candidatura
+      parameters: [{$ref: '#/components/parameters/VagaId'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [curriculo]
+              properties:
+                curriculo: { type: string, format: binary }
+      responses:
+        '201': { description: Perfil, candidatura, match e token do portal }
+        '415': { description: Formato nao suportado }
+        '422': { description: Texto ou e-mail nao identificado }
+  /ats/candidaturas/{candidaturaId}/mover:
+    patch:
+      summary: Fallback REST para movimento otimista do card
+      parameters: [{$ref: '#/components/parameters/CandidaturaId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vagaId, etapa, versao]
+              properties:
+                vagaId: { type: integer }
+                etapa: { $ref: '#/components/schemas/Etapa' }
+                posicao: { type: number }
+                versao: { type: integer, minimum: 1 }
+                correlationId: { type: string, format: uuid }
+      responses:
+        '200': { description: Card atualizado }
+        '409': { description: Versao ou lock conflitante }
+  /ats/candidaturas/{candidaturaId}/mensagens:
+    get:
+      parameters: [{$ref: '#/components/parameters/CandidaturaId'}]
+      responses:
+        '200': { description: Historico de chat }
+    post:
+      parameters: [{$ref: '#/components/parameters/CandidaturaId'}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mensagem, idempotencia]
+              properties:
+                mensagem: { type: string, maxLength: 8000 }
+                idempotencia: { type: string, format: uuid }
+      responses:
+        '201': { description: Mensagem persistida }
+  /ats/entrevistas:
+    post:
+      summary: Agenda entrevista e prepara sincronizacao de calendario
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidaturaId, inicioEm, fimEm]
+              properties:
+                candidaturaId: { type: integer }
+                inicioEm: { type: string, format: date-time }
+                fimEm: { type: string, format: date-time }
+                provedor: { type: string, enum: [INTERNO, GOOGLE, OUTLOOK] }
+      responses:
+        '201': { description: Entrevista agendada ou pendente de sincronizacao }
+  /ats/publico/portal/{token}:
+    get:
+      security: []
+      parameters: [{$ref: '#/components/parameters/PortalToken'}]
+      responses:
+        '200': { description: Candidatura e chat do candidato }
+        '401': { description: Token invalido, expirado ou revogado }
+  /ats/publico/portal/{token}/mensagens:
+    post:
+      security: []
+      parameters: [{$ref: '#/components/parameters/PortalToken'}]
+      responses:
+        '201': { description: Mensagem externa persistida }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    VagaId: { in: path, name: vagaId, required: true, schema: { type: integer, minimum: 1 } }
+    CandidaturaId: { in: path, name: candidaturaId, required: true, schema: { type: integer, minimum: 1 } }
+    PortalToken: { in: path, name: token, required: true, schema: { type: string, minLength: 32 } }
+  schemas:
+    Etapa:
+      type: string
+      enum: [APLICACAO, TRIAGEM, ENTREVISTA_TECNICA, FIT_CULTURAL, PROPOSTA, CONTRATADO]
+x-socket-io:
+  namespace: /
+  authentication: JWT em auth.token ou token externo em auth.portalToken
+  clientEvents: [vaga:join, cursor:move, card:lock, card:unlock, card:move, chat:join, chat:send]
+  serverEvents: [presence:update, cursor:update, card:locked, card:unlocked, card:moved, chat:message, interview:scheduled]

@@ -1,0 +1,286 @@
+openapi: 3.1.0
+info:
+  title: RH Corporativo Core API
+  version: 1.0.0
+  description: Contrato estrito para admissão digital, documentos, assinatura e organograma.
+servers:
+  - url: http://localhost:3333
+security:
+  - bearerAuth: []
+paths:
+  /core/admissoes:
+    get:
+      summary: Lista o funil de admissão
+      responses:
+        '200':
+          description: Admissões
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Admissao' } }
+    post:
+      summary: Inicia uma pré-admissão
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NovaAdmissao' }
+      responses:
+        '201':
+          description: Admissão criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Admissao' }
+  /core/admissoes/{id}:
+    get:
+      summary: Obtém o dossiê com documentos e OCR
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Dossiê
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Admissao'
+                  - type: object
+                    required: [documentos]
+                    properties:
+                      documentos: { type: array, items: { $ref: '#/components/schemas/Documento' } }
+  /core/admissoes/{id}/documentos:
+    post:
+      summary: Envia um arquivo; o cliente repete a chamada em paralelo para lotes
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: X-Document-Type
+          in: header
+          required: true
+          schema: { $ref: '#/components/schemas/TipoDocumento' }
+        - name: X-File-Name
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/pdf: { schema: { type: string, contentMediaType: application/pdf, contentEncoding: binary } }
+          image/jpeg: { schema: { type: string, contentMediaType: image/jpeg, contentEncoding: binary } }
+          image/png: { schema: { type: string, contentMediaType: image/png, contentEncoding: binary } }
+      responses:
+        '201':
+          description: Documento criptografado e catalogado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Documento' }
+        '413': { $ref: '#/components/responses/Erro' }
+        '415': { $ref: '#/components/responses/Erro' }
+        '422': { $ref: '#/components/responses/Erro' }
+  /core/documentos/{id}/validacao:
+    patch:
+      summary: Aprova ou recusa um documento
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [APROVADO, RECUSADO] }
+                justificativa: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: Dossiê atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Admissao' }
+  /core/documentos/{id}/conteudo:
+    get:
+      summary: Descriptografa para preview autenticado sem cache
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Binário original
+          content:
+            application/pdf: { schema: { type: string, contentEncoding: binary } }
+            image/jpeg: { schema: { type: string, contentEncoding: binary } }
+            image/png: { schema: { type: string, contentEncoding: binary } }
+  /core/colaboradores/{id}/contratos:
+    post:
+      summary: Gera PDF, cria PIN e enfileira e-mail
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '201':
+          description: Contrato pendente
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, token_publico, status, expiresInSeconds]
+                properties:
+                  id: { type: integer, minimum: 1 }
+                  token_publico: { type: string, format: uuid }
+                  status: { type: string, const: PENDENTE }
+                  expiresInSeconds: { type: integer, const: 900 }
+                  pinParaDemonstracao: { type: string, pattern: '^[0-9]{6}$' }
+  /core/organograma:
+    get:
+      summary: Lista a árvore de cargos
+      responses:
+        '200':
+          description: Cargos
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CargoOrganograma' } }
+  /core/organograma/cargos/{cargoId}/superior:
+    patch:
+      summary: Move um cargo transacionalmente
+      parameters:
+        - name: cargoId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [novoSuperiorId, motivo, versao]
+              properties:
+                novoSuperiorId: { type: [integer, 'null'], minimum: 1 }
+                motivo: { type: string, minLength: 1, maxLength: 500 }
+                versao: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Árvore recalculada
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CargoOrganograma' } }
+        '409': { $ref: '#/components/responses/Erro' }
+  /core/publico/assinaturas/{token}/confirmar:
+    post:
+      security: []
+      summary: Confirma assinatura com PIN temporário
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200':
+          description: Colaborador ativado
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contractId, status]
+                properties:
+                  contractId: { type: integer, minimum: 1 }
+                  status: { type: string, const: ASSINADO }
+        '401': { $ref: '#/components/responses/Erro' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  responses:
+    Erro:
+      description: Erro tipado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+  schemas:
+    TipoDocumento:
+      type: string
+      enum: [RG, CPF, PIS, COMPROVANTE_RESIDENCIA, DIPLOMA]
+    NovaAdmissao:
+      type: object
+      additionalProperties: false
+      required: [nomeCompleto, cpf, email]
+      properties:
+        nomeCompleto: { type: string, minLength: 1, maxLength: 180 }
+        nomeSocial: { type: string, maxLength: 180 }
+        cpf: { type: string, pattern: '^[0-9]{11}$' }
+        email: { type: string, format: email, maxLength: 180 }
+        telefone: { type: string, maxLength: 32 }
+        cargoId: { type: integer, minimum: 1 }
+        departamentoId: { type: integer, minimum: 1 }
+        salario: { type: number, minimum: 0 }
+        dataAdmissao: { type: string, format: date }
+    Admissao:
+      type: object
+      additionalProperties: false
+      required: [id, nomeCompleto, cpf, email, status, etapaAdmissao, documentosTotal, documentosAprovados]
+      properties:
+        id: { type: integer, minimum: 1 }
+        nomeCompleto: { type: string }
+        cpf: { type: string }
+        email: { type: string, format: email }
+        telefone: { type: [string, 'null'] }
+        status: { type: string }
+        etapaAdmissao: { type: string, enum: [PRE_ADMISSAO, ENVIO_DOCUMENTOS, VALIDACAO_RH, INTEGRACAO_SISTEMICA, CONCLUIDA] }
+        cargoNome: { type: [string, 'null'] }
+        departamentoNome: { type: [string, 'null'] }
+        documentosTotal: { type: integer, minimum: 0 }
+        documentosAprovados: { type: integer, minimum: 0 }
+        documentosPendentes: { type: integer, minimum: 0 }
+        documentosRecusados: { type: integer, minimum: 0 }
+        criadoEm: { type: string, format: date-time }
+    Documento:
+      type: object
+      additionalProperties: false
+      required: [id, tipo, nomeOriginal, mimeType, tamanhoBytes, metadadosOcr, confiancaOcr, statusValidacao]
+      properties:
+        id: { type: integer, minimum: 1 }
+        tipo: { $ref: '#/components/schemas/TipoDocumento' }
+        nomeOriginal: { type: string }
+        mimeType: { type: string, enum: [application/pdf, image/jpeg, image/png] }
+        tamanhoBytes: { type: integer, minimum: 1, maximum: 10485760 }
+        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        metadadosOcr: { type: object, additionalProperties: { type: string } }
+        confiancaOcr: { type: number, minimum: 0, maximum: 100 }
+        statusValidacao: { type: string, enum: [PENDENTE, APROVADO, RECUSADO] }
+        justificativa: { type: [string, 'null'] }
+    CargoOrganograma:
+      type: object
+      additionalProperties: false
+      required: [id, nome, departamentoId, superiorId, nivel, versao, departamentoNome, departamentoCodigo, ocupantes]
+      properties:
+        id: { type: integer, minimum: 1 }
+        nome: { type: string }
+        departamentoId: { type: integer, minimum: 1 }
+        superiorId: { type: [integer, 'null'], minimum: 1 }
+        nivel: { type: integer, minimum: 1 }
+        versao: { type: integer, minimum: 1 }
+        departamentoNome: { type: string }
+        departamentoCodigo: { type: string }
+        ocupantes: { type: integer, minimum: 0 }
+    Erro:
+      type: object
+      additionalProperties: false
+      required: [erro]
+      properties:
+        erro: { type: string }
+        codigo: { type: string }
+        detalhes: {}

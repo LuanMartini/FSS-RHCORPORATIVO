@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
+import { CoreRhProvider } from './context/CoreRhContext';
 import { apiFetch } from './services/api';
 import Sidebar from './components/Sidebar';
 
@@ -8,13 +9,18 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard, { type MetricasDashboard } from './pages/Dashboard';
 import ListarFuncionarios from './pages/ListarFuncionarios';
-import AdmitirFuncionario from './pages/AdmitirFuncionario';
-import RegistrarPonto from './pages/RegistrarPonto';
+import AdmissaoDigital from './pages/AdmissaoDigital';
+import Organograma from './pages/Organograma';
+import EspelhoPontoAvancado from './pages/EspelhoPontoAvancado';
 import Holerite from './pages/Holerite';
 import FolhaCompleta from './pages/FolhaCompleta';
+const AtsRecrutamento = lazy(() => import('./pages/AtsRecrutamento'));
+const GestaoDesempenho = lazy(() => import('./pages/GestaoDesempenho'));
+const Beneficios = lazy(() => import('./pages/Beneficios'));
 import Ferias from './pages/Ferias';
-import Beneficios from './pages/Beneficios';
-import Treinamentos from './pages/Treinamentos';
+const Treinamentos = lazy(() => import('./pages/Treinamentos'));
+const ClimaComunicacao = lazy(() => import('./pages/ClimaComunicacao'));
+const AuditoriaAnalytics = lazy(() => import('./pages/AuditoriaAnalytics'));
 import Advertencias from './pages/Advertencias';
 
 import type { Page } from './types/page';
@@ -22,19 +28,28 @@ import { mapFuncionarioApi, type FuncionarioView } from './utils/funcionario';
 
 function AppShell() {
   const { user, logout } = useAuth();
-  const [page, setPage] = useState<Page>('dashboard');
+  const permissions = useMemo(() => user?.permissoes ?? [], [user?.permissoes]);
+  const [page, setPage] = useState<Page>(() => permissions.includes('rh.dashboard.read') ? 'dashboard' : 'ponto');
   const [funcionarios, setFuncionarios] = useState<FuncionarioView[]>([]);
   const [metricas, setMetricas] = useState<MetricasDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
 
   const refreshDados = useCallback(async () => {
+    if (!permissions.includes('rh.dashboard.read') && !permissions.includes('employee.read')) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setErro('');
     try {
       const [dash, raw] = await Promise.all([
-        apiFetch<MetricasDashboard>('/rh/dashboard'),
-        apiFetch<Record<string, unknown>[]>('/rh/funcionarios'),
+        permissions.includes('rh.dashboard.read')
+          ? apiFetch<MetricasDashboard>('/rh/dashboard')
+          : Promise.resolve(null),
+        permissions.includes('employee.read')
+          ? apiFetch<Record<string, unknown>[]>('/rh/funcionarios')
+          : Promise.resolve([]),
       ]);
       setMetricas(dash);
       setFuncionarios(raw.map(mapFuncionarioApi));
@@ -45,7 +60,7 @@ function AppShell() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [permissions]);
 
   useEffect(() => {
     refreshDados();
@@ -89,19 +104,29 @@ function AppShell() {
           />
         );
       case 'admitir':
-        return <AdmitirFuncionario onSuccess={refreshDados} />;
+        return <AdmissaoDigital />;
+      case 'organograma':
+        return <Organograma />;
       case 'ponto':
-        return <RegistrarPonto funcionarios={funcionarios} onSuccess={refreshDados} />;
+        return <EspelhoPontoAvancado />;
       case 'holerite':
         return <Holerite funcionarios={funcionarios} />;
       case 'folha':
         return <FolhaCompleta />;
+      case 'ats':
+        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando workspace de recrutamento…</p>}><AtsRecrutamento /></Suspense>;
+      case 'performance':
+        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando People Analytics…</p>}><GestaoDesempenho /></Suspense>;
       case 'ferias':
         return <Ferias funcionarios={funcionarios} onRefresh={refreshDados} />;
       case 'beneficios':
-        return <Beneficios funcionarios={funcionarios} onRefresh={refreshDados} />;
+        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando benefícios…</p>}><Beneficios /></Suspense>;
       case 'treinamentos':
-        return <Treinamentos funcionarios={funcionarios} onRefresh={refreshDados} />;
+        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando academia corporativa…</p>}><Treinamentos /></Suspense>;
+      case 'clima':
+        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando pulso organizacional…</p>}><ClimaComunicacao /></Suspense>;
+      case 'auditoria':
+        return <Suspense fallback={<p className="text-sm text-slate-500">Validando ledger e analytics…</p>}><AuditoriaAnalytics /></Suspense>;
       case 'advertencias':
         return <Advertencias funcionarios={funcionarios} onRefresh={refreshDados} />;
       default:
@@ -113,7 +138,7 @@ function AppShell() {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 lg:flex-row">
-      <Sidebar page={page} setPage={setPage} userName={user?.nome} onLogout={logout} />
+      <Sidebar page={page} setPage={setPage} userName={user?.nome} permissions={permissions} onLogout={logout} />
 
       <main className="flex-1 px-4 py-6 sm:px-6 lg:ml-[220px] lg:px-12 lg:py-10">
         {renderPage()}
@@ -133,7 +158,11 @@ function AuthGate() {
       : <Register onSwitch={() => setAuthScreen('login')} />;
   }
 
-  return <AppShell />;
+  return (
+    <CoreRhProvider>
+      <AppShell />
+    </CoreRhProvider>
+  );
 }
 
 export default function App() {

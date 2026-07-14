@@ -1,5 +1,12 @@
 name: CI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -9,6 +16,42 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres-ci-only
+          POSTGRES_DB: rhcorp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rhcorp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-secret-not-for-production
+      AUDIT_LEDGER_SECRET: ci-audit-secret-not-for-production
+      AUDIT_PAYLOAD_KEY: 42b519c09038fe9d1d67f6f41f0ab804a69c33fb6424eeaff953f9210b917c9e
+      DOCUMENT_ENCRYPTION_KEY: 147b46aff73c02e17a56d7292f4ee395f4d8182af0b466a968f655e081eaa4fb
+      PG_HOST: localhost
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres-ci-only
+      PG_DATABASE: rhcorp
+      REDIS_URL: redis://localhost:6379
+      RUN_DB_INTEGRATION: 1
 
     steps:
       - name: Checkout
@@ -35,5 +78,23 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Validate
+      - name: Migrate database
+        run: npm run db:migrate
+        working-directory: backend
+
+      - name: Verify database integrity
+        run: npm run db:verify
+        working-directory: backend
+
+      - name: Validate Redis
+        run: node --input-type=module -e "import {createClient} from 'redis'; const c=createClient({url:process.env.REDIS_URL}); await c.connect(); if(await c.ping()!=='PONG') process.exit(1); await c.quit();"
+        working-directory: backend
+
+      - name: Lint, typecheck, tests and build
         run: npm run check
+
+      - name: Dependency audit
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm --prefix backend audit --omit=dev --audit-level=high
+          npm --prefix frontend audit --omit=dev --audit-level=high

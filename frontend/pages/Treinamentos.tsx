@@ -1,172 +1,32 @@
-import { useState, useEffect, type FormEvent } from 'react';
-import { apiFetch } from '../services/api';
-import type { FuncionarioView } from '../utils/funcionario';
+import{useCallback,useEffect,useMemo,useRef,useState}from'react';import{apiFetch}from'../services/api';import type{LmsCourse,LmsDashboard,LmsLesson,QuizAttempt}from'../types/lms';
+const n=(value:unknown)=>Number(value??0);const seconds=(value:number)=>`${Math.floor(value/60).toString().padStart(2,'0')}:${Math.floor(value%60).toString().padStart(2,'0')}`;
+function normalizeLesson(item:LmsLesson):LmsLesson{return{...item,id:n(item.id),curso_id:n(item.curso_id),duracao_segundos:n(item.duracao_segundos),ultimo_segundo:n(item.ultimo_segundo),maximo_segundo_assistido:n(item.maximo_segundo_assistido),tempo_valido_segundos:n(item.tempo_valido_segundos),percentual:n(item.percentual),versao:n(item.versao),concluida:Boolean(item.concluida)}}
+function normalizeCourse(item:LmsCourse):LmsCourse{return{...item,id:n(item.id),ordem:n(item.ordem),curso_pre_requisito_id:item.curso_pre_requisito_id===null?null:n(item.curso_pre_requisito_id),progresso_percentual:n(item.progresso_percentual),nota_final:item.nota_final===null?null:n(item.nota_final),nota_minima:n(item.nota_minima),versao:n(item.versao),desbloqueado:Boolean(item.desbloqueado)}}
 
-interface Treinamento {
-  id: number;
-  nome: string;
-  cargaHoraria: number;
-  modalidade?: string;
-  descricao?: string | null;
+export default function Treinamentos(){
+  const[data,setData]=useState<LmsDashboard|null>(null);const[collaboratorId,setCollaboratorId]=useState<number|null>(null);const[trailId,setTrailId]=useState<number|null>(null);const[period,setPeriod]=useState<'SEMANAL'|'MENSAL'>('SEMANAL');const[courseId,setCourseId]=useState<number|null>(null);const[lessonId,setLessonId]=useState<number|null>(null);const[playing,setPlaying]=useState(false);const[tabActive,setTabActive]=useState(document.visibilityState==='visible');const[position,setPosition]=useState(0);const[quiz,setQuiz]=useState<QuizAttempt|null>(null);const[answers,setAnswers]=useState<Record<number,number>>({});const[loading,setLoading]=useState(true);const[error,setError]=useState('');const[notice,setNotice]=useState('');
+  const videoRef=useRef<HTMLVideoElement|null>(null);const sequence=useRef(0);const lastReported=useRef(0);const syncing=useRef(false);const loadedLessonId=useRef<number|null>(null);
+  const load=useCallback(async(silent=false)=>{if(!silent)setLoading(true);try{const query=new URLSearchParams();if(collaboratorId)query.set('colaboradorId',String(collaboratorId));if(trailId)query.set('trilhaId',String(trailId));query.set('periodo',period);const response=await apiFetch<LmsDashboard>(`/lms/dashboard?${query}`);response.courses=response.courses.map(normalizeCourse);response.lessons=response.lessons.map(normalizeLesson);setData(response);setCollaboratorId(current=>current??n(response.selectedCollaboratorId));setTrailId(current=>current??n(response.selectedTrailId));const first=response.courses.find(item=>item.desbloqueado&&item.status!=='CONCLUIDO')??response.courses.find(item=>item.desbloqueado);setCourseId(current=>current&&response.courses.some(item=>item.id===current&&item.desbloqueado)?current:first?.id??null);setError('');}catch(err){setError(err instanceof Error?err.message:'Falha ao carregar a trilha.');}finally{if(!silent)setLoading(false)}},[collaboratorId,trailId,period]);useEffect(()=>{void load()},[load]);
+  const courses=useMemo(()=>(data?.courses??[]).map(normalizeCourse),[data?.courses]);const activeCourse=courses.find(item=>item.id===courseId)??null;const lessons=useMemo(()=>(data?.lessons??[]).map(normalizeLesson).filter(item=>item.curso_id===courseId),[data?.lessons,courseId]);const activeLesson=lessons.find(item=>item.id===lessonId)??lessons[0]??null;
+  useEffect(()=>{if(activeLesson&&lessonId!==activeLesson.id)setLessonId(activeLesson.id)},[activeLesson,lessonId]);
+  useEffect(()=>{if(!activeLesson||loadedLessonId.current===activeLesson.id)return;loadedLessonId.current=activeLesson.id;setPosition(activeLesson.ultimo_segundo);lastReported.current=activeLesson.ultimo_segundo;sequence.current=0;setPlaying(false);const video=videoRef.current;if(video){video.currentTime=activeLesson.ultimo_segundo;video.pause()}},[activeLesson]);
+  const mergeProgress=useCallback((lesson:number,progress:Record<string,unknown>)=>setData(current=>{if(!current)return current;const enrollment=progress.matricula as Record<string,unknown>|undefined;return{...current,lessons:current.lessons.map(item=>item.id===lesson?normalizeLesson({...item,ultimo_segundo:n(progress.ultimo_segundo),maximo_segundo_assistido:n(progress.maximo_segundo_assistido),tempo_valido_segundos:n(progress.tempo_valido_segundos),percentual:n(progress.percentual),concluida:Boolean(progress.concluida),versao:n(progress.versao)}):item),courses:enrollment?current.courses.map(item=>item.id===n(enrollment.curso_id)?normalizeCourse({...item,status:String(enrollment.status),progresso_percentual:n(enrollment.progresso_percentual),nota_final:enrollment.nota_final===null?null:n(enrollment.nota_final),versao:n(enrollment.versao)}):item):current.courses}}),[]);
+  const sync=useCallback(async(active:boolean)=>{const video=videoRef.current;if(!video||!activeLesson||!collaboratorId||syncing.current)return;const current=video.currentTime;const delta=active?Math.max(0,Math.min(7,current-lastReported.current)):0;syncing.current=true;try{const progress=await apiFetch<Record<string,unknown>>(`/lms/aulas/${activeLesson.id}/progresso`,{method:'POST',body:JSON.stringify({colaboradorId:collaboratorId,segundoAtual:current,deltaAssistido:delta,abaAtiva:active&&document.visibilityState==='visible',visibilidade:document.visibilityState,idempotencia:crypto.randomUUID(),sequencia:sequence.current++})});lastReported.current=current;mergeProgress(activeLesson.id,progress);setError('')}catch(err){video.currentTime=n(activeLesson.maximo_segundo_assistido);setPosition(video.currentTime);setPlaying(false);video.pause();setError(err instanceof Error?err.message:'Sincronização recusada.')}finally{syncing.current=false}},[activeLesson,collaboratorId,mergeProgress]);
+  useEffect(()=>{const onVisibility=()=>{const visible=document.visibilityState==='visible';setTabActive(visible);if(!visible){videoRef.current?.pause();setPlaying(false);void sync(false)}};document.addEventListener('visibilitychange',onVisibility);return()=>document.removeEventListener('visibilitychange',onVisibility)},[sync]);
+  useEffect(()=>{if(!playing||!tabActive)return;const timer=window.setInterval(()=>void sync(true),5000);return()=>window.clearInterval(timer)},[playing,tabActive,sync]);
+  const togglePlay=async()=>{const video=videoRef.current;if(!video||!tabActive)return;if(video.paused){await video.play();setPlaying(true)}else{video.pause();setPlaying(false);await sync(true)}};
+  const onTimeUpdate=()=>{const video=videoRef.current;if(!video||!activeLesson)return;const allowed=Math.min(activeLesson.duracao_segundos,activeLesson.maximo_segundo_assistido+7.5);if(video.currentTime>allowed+0.3){video.currentTime=activeLesson.maximo_segundo_assistido;setError('Avanço rápido bloqueado: retome do último ponto validado.');return}setPosition(video.currentTime)};
+  const startQuiz=async()=>{if(!activeCourse||!collaboratorId)return;try{const attempt=await apiFetch<QuizAttempt>(`/lms/cursos/${activeCourse.id}/prova/iniciar`,{method:'POST',body:JSON.stringify({colaboradorId:collaboratorId})});setQuiz(attempt);setAnswers({})}catch(err){setError(err instanceof Error?err.message:'Prova indisponível.')}};
+  const submitQuiz=async()=>{if(!quiz||!collaboratorId)return;try{const result=await apiFetch<{grade:number;approved:boolean}>(`/lms/tentativas/${quiz.id}/responder`,{method:'POST',body:JSON.stringify({colaboradorId:collaboratorId,respostas:quiz.questoes_snapshot.map(question=>({questaoId:question.id,alternativaId:answers[question.id]}))})});setQuiz(null);setNotice(result.approved?`Aprovado com ${result.grade}%! XP e conquistas atualizados.`:`Nota ${result.grade}%. Revise o conteúdo antes da próxima tentativa.`);await load(true)}catch(err){setError(err instanceof Error?err.message:'Falha ao enviar prova.')}};
+  if(loading&&!data)return<p className="text-sm text-slate-500">Preparando sua trilha de aprendizagem…</p>;
+  const overall=courses.length?courses.reduce((sum,item)=>sum+item.progresso_percentual,0)/courses.length:0;
+  return<div className="mx-auto max-w-[1550px] space-y-5"><header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><p className="text-[11px] font-semibold uppercase tracking-[.22em] text-violet-600">Learning Experience · Compliance</p><h1 className="mt-1 font-serif text-3xl font-semibold text-[#102f4a]">Academia Corporativa</h1><p className="mt-1 text-sm text-slate-500">Trilhas guiadas, presença auditável e conquistas que reconhecem evolução.</p></div><div className="flex gap-2"><select value={collaboratorId??''} onChange={event=>setCollaboratorId(Number(event.target.value))} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold shadow-sm">{data?.collaborators.map(item=><option key={item.id} value={item.id}>{item.nome}</option>)}</select><div className="rounded-xl bg-[#102f4a] px-4 py-2 text-white"><p className="text-[8px] uppercase tracking-wider text-violet-300">XP total</p><p className="font-serif text-lg font-bold">{n(data?.xp).toLocaleString('pt-BR')}</p></div></div></header>
+    {(error||notice)&&<div className={`flex justify-between rounded-xl border px-4 py-3 text-xs ${error?'border-rose-200 bg-rose-50 text-rose-700':'border-violet-200 bg-violet-50 text-violet-700'}`}><span>{error||notice}</span><button onClick={()=>{setError('');setNotice('')}}>×</button></div>}
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-violet-600">{data?.trails.find(item=>item.id===trailId)?.nome}</p><p className="mt-1 text-xs text-slate-500">{courses.filter(item=>item.status==='CONCLUIDO').length} de {courses.length} módulos concluídos</p></div><strong className="font-serif text-2xl text-[#102f4a]">{overall.toFixed(0)}%</strong></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-emerald-400 transition-[width] duration-500" style={{width:`${overall}%`}}/></div></section>
+    <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)_310px]"><aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><h2 className="text-sm font-semibold text-slate-900">Sua trilha</h2><div className="mt-4 space-y-2">{courses.map((course,index)=><CourseItem key={course.id} course={course} active={course.id===courseId} index={index} onClick={()=>course.desbloqueado&&setCourseId(course.id)}/>)}</div><div className="mt-5 border-t border-slate-100 pt-4"><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Aulas do módulo</p>{lessons.map(lesson=><button key={lesson.id} onClick={()=>setLessonId(lesson.id)} className={`mt-2 flex w-full items-center gap-2 rounded-lg p-2 text-left text-xs ${lesson.id===activeLesson?.id?'bg-violet-50 text-violet-700':'text-slate-600'}`}><span>{lesson.concluida?'✓':'▶'}</span><span className="flex-1 truncate">{lesson.titulo}</span><span>{lesson.percentual.toFixed(0)}%</span></button>)}</div></aside>
+      <main className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-950">{activeLesson?<><video ref={videoRef} src={activeLesson.video_url} preload="metadata" playsInline controls={false} controlsList="nodownload noplaybackrate" disablePictureInPicture onLoadedMetadata={event=>{const target=Math.min(activeLesson.ultimo_segundo,event.currentTarget.duration||activeLesson.duracao_segundos);event.currentTarget.currentTime=target;setPosition(target);lastReported.current=target}} onTimeUpdate={onTimeUpdate} onEnded={()=>{setPlaying(false);void sync(true)}} className="h-full w-full object-contain"/>{!tabActive&&<div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/90 text-center text-white"><div><p className="text-xl">◉</p><p className="mt-2 text-sm font-semibold">Presença pausada</p><p className="text-xs text-slate-400">Retorne à aba para continuar.</p></div></div>}<div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-4 pt-16"><div className="h-1.5 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-violet-400 transition-[width]" style={{width:`${activeLesson.duracao_segundos?position/activeLesson.duracao_segundos*100:0}%`}}/></div><div className="mt-3 flex items-center gap-3 text-white"><button onClick={()=>void togglePlay()} className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[#102f4a]">{playing?'Ⅱ':'▶'}</button><span className="text-xs tabular-nums">{seconds(position)} / {seconds(activeLesson.duracao_segundos)}</span><span className="ml-auto rounded-full bg-white/10 px-2 py-1 text-[9px]">✓ sincronização a cada 5s</span></div></div></>:<div className="flex h-full items-center justify-center text-sm text-slate-400">Selecione uma aula desbloqueada.</div>}</div><div className="p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-violet-600">Módulo {activeCourse?.ordem}</p><h2 className="mt-1 text-xl font-semibold text-[#102f4a]">{activeLesson?.titulo??activeCourse?.titulo}</h2><p className="mt-1 text-xs leading-relaxed text-slate-500">{activeLesson?.descricao??activeCourse?.descricao}</p></div>{activeLesson&&<div className="text-right"><strong className="text-lg text-violet-700">{activeLesson.percentual.toFixed(1)}%</strong><p className="text-[9px] text-slate-400">presença validada</p></div>}</div><div className="mt-5 flex items-center justify-between rounded-xl bg-slate-50 p-3"><p className="text-[10px] text-slate-500">A avaliação exige nota mínima de <strong>{activeCourse?.nota_minima??80}%</strong>.</p><button onClick={()=>void startQuiz()} disabled={!['AGUARDANDO_PROVA','REPROVADO'].includes(activeCourse?.status??'')} className="rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white disabled:bg-slate-200 disabled:text-slate-400">Iniciar avaliação</button></div></div></main>
+      <aside className="space-y-4"><section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><h2 className="text-sm font-semibold text-slate-900">Leaderboard</h2><div className="flex rounded-lg bg-slate-100 p-0.5"><button onClick={()=>setPeriod('SEMANAL')} className={`rounded-md px-2 py-1 text-[9px] ${period==='SEMANAL'?'bg-white font-bold shadow-sm':''}`}>Semana</button><button onClick={()=>setPeriod('MENSAL')} className={`rounded-md px-2 py-1 text-[9px] ${period==='MENSAL'?'bg-white font-bold shadow-sm':''}`}>Mês</button></div></div><div className="mt-4 space-y-3">{data?.leaderboard.map(entry=><div key={entry.colaborador_id} className="flex items-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${n(entry.posicao)<=3?'bg-amber-100 text-amber-700':'bg-slate-100 text-slate-500'}`}>{entry.posicao}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{entry.nome}</p><p className="truncate text-[9px] text-slate-400">{entry.equipe}</p></div><strong className="text-xs text-violet-700">{entry.xp} XP</strong></div>)}{!data?.leaderboard.length&&<p className="text-xs text-slate-400">O ranking começa com a primeira conquista.</p>}</div></section><section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><h2 className="text-sm font-semibold">Conquistas</h2><div className="mt-3 grid grid-cols-2 gap-2">{data?.badges.map(badge=><div key={badge.id} className="rounded-xl p-3 text-center text-white" style={{background:`linear-gradient(135deg,${badge.cor_primaria},#102f4a)`}}><svg viewBox="0 0 64 64" className="mx-auto h-10 w-10"><path d="M32 3 57 13v22c0 15-10 24-25 30C17 59 7 50 7 35V13Z" fill="white" fillOpacity=".18" stroke="white"/><text x="32" y="40" textAnchor="middle" fontSize="25" fill="white">★</text></svg><p className="mt-1 text-[10px] font-bold">{badge.nome}</p><p className="text-[8px] text-white/70">+{badge.xp_bonus} XP</p></div>)}{!data?.badges.length&&<div className="col-span-2 rounded-xl border border-dashed border-slate-200 p-4 text-center text-[10px] text-slate-400">Conclua o primeiro módulo para desbloquear uma medalha.</div>}</div></section></aside></div>
+    {quiz&&<QuizModal quiz={quiz} answers={answers} setAnswers={setAnswers} onClose={()=>setQuiz(null)} onSubmit={()=>void submitQuiz()}/>}</div>;
 }
-
-interface Props {
-  funcionarios: FuncionarioView[];
-  onRefresh: () => void;
-}
-
-export default function Treinamentos({ funcionarios, onRefresh }: Props) {
-  const [lista, setLista] = useState<Treinamento[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState('');
-  const [novo, setNovo] = useState({ nome: '', cargaHoraria: '', descricao: '', modalidade: 'PRESENCIAL' });
-  const [insc, setInsc] = useState({ funcionarioId: '', treinamentoId: '' });
-
-  async function carregar() {
-    try {
-      const data = await apiFetch<Treinamento[]>('/rh/treinamentos');
-      setLista(data);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao listar treinamentos');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    carregar();
-  }, []);
-
-  async function criar(e: FormEvent) {
-    e.preventDefault();
-    setErro('');
-    try {
-      await apiFetch('/rh/treinamentos', {
-        method: 'POST',
-        body: JSON.stringify({
-          nome: novo.nome,
-          cargaHoraria: Number(novo.cargaHoraria),
-          descricao: novo.descricao || undefined,
-          modalidade: novo.modalidade,
-        }),
-      });
-      setNovo({ nome: '', cargaHoraria: '', descricao: '', modalidade: 'PRESENCIAL' });
-      await carregar();
-      onRefresh();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao criar');
-    }
-  }
-
-  async function inscrever(e: FormEvent) {
-    e.preventDefault();
-    setErro('');
-    try {
-      await apiFetch('/rh/treinamentos/inscrever', {
-        method: 'POST',
-        body: JSON.stringify({
-          funcionarioId: Number(insc.funcionarioId),
-          treinamentoId: Number(insc.treinamentoId),
-        }),
-      });
-      setInsc({ funcionarioId: '', treinamentoId: '' });
-      onRefresh();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro na inscrição');
-    }
-  }
-
-  if (loading) return <p className="text-slate-500">Carregando...</p>;
-
-  return (
-    <div className="space-y-8 max-w-4xl">
-      <h2 className="font-serif text-2xl text-[#0f2340]">Treinamentos</h2>
-      {erro && <p className="text-red-600 text-sm">{erro}</p>}
-
-      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold">Novo treinamento</h3>
-        <form onSubmit={criar} className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <input
-            required
-            placeholder="Nome"
-            value={novo.nome}
-            onChange={e => setNovo({ ...novo, nome: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm md:col-span-2"
-          />
-          <input
-            required
-            type="number"
-            placeholder="Carga horária"
-            value={novo.cargaHoraria}
-            onChange={e => setNovo({ ...novo, cargaHoraria: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          />
-          <select
-            value={novo.modalidade}
-            onChange={e => setNovo({ ...novo, modalidade: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="PRESENCIAL">Presencial</option>
-            <option value="ONLINE">Online</option>
-            <option value="HIBRIDO">Híbrido</option>
-          </select>
-          <input
-            placeholder="Descrição (opcional)"
-            value={novo.descricao}
-            onChange={e => setNovo({ ...novo, descricao: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm md:col-span-2"
-          />
-          <button type="submit" className="px-4 py-2 bg-[#0f2340] text-white rounded-lg text-sm w-fit">Criar</button>
-        </form>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold">Inscrever funcionário</h3>
-        <form onSubmit={inscrever} className="flex flex-wrap gap-2 items-end">
-          <select
-            required
-            value={insc.funcionarioId}
-            onChange={e => setInsc({ ...insc, funcionarioId: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="">Funcionário</option>
-            {funcionarios.map(f => (
-              <option key={f.id} value={f.id}>{f.nome}</option>
-            ))}
-          </select>
-          <select
-            required
-            value={insc.treinamentoId}
-            onChange={e => setInsc({ ...insc, treinamentoId: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="">Treinamento</option>
-            {lista.map(t => (
-              <option key={t.id} value={t.id}>{t.nome}</option>
-            ))}
-          </select>
-          <button type="submit" className="px-4 py-2 bg-slate-700 text-white rounded-lg text-sm">Inscrever</button>
-        </form>
-      </div>
-
-      <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="text-left px-4 py-2">Nome</th>
-            <th className="text-left px-4 py-2">Horas</th>
-            <th className="text-left px-4 py-2">Modalidade</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lista.map(t => (
-            <tr key={t.id} className="border-t border-slate-100">
-              <td className="px-4 py-2">{t.nome}</td>
-              <td className="px-4 py-2">{t.cargaHoraria} h</td>
-              <td className="px-4 py-2">{t.modalidade ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+function CourseItem({course,active,index,onClick}:{course:LmsCourse;active:boolean;index:number;onClick:()=>void}){const complete=course.status==='CONCLUIDO';return<button onClick={onClick} disabled={!course.desbloqueado} className={`relative flex w-full gap-3 rounded-xl border p-3 text-left transition ${active?'border-violet-300 bg-violet-50':course.desbloqueado?'border-slate-200 hover:border-violet-200':'border-slate-100 bg-slate-50 opacity-60'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${complete?'bg-emerald-500 text-white':course.desbloqueado?'bg-[#102f4a] text-white':'bg-slate-200 text-slate-500'}`}>{complete?'✓':course.desbloqueado?index+1:'⌁'}</span><span className="min-w-0"><span className="block text-xs font-semibold text-slate-800">{course.titulo}</span><span className="mt-1 block text-[9px] text-slate-500">{complete?`Concluído · nota ${course.nota_final}%`:course.desbloqueado?`${course.progresso_percentual.toFixed(0)}% assistido`:'Complete o módulo anterior'}</span></span></button>}
+function QuizModal({quiz,answers,setAnswers,onClose,onSubmit}:{quiz:QuizAttempt;answers:Record<number,number>;setAnswers:(value:Record<number,number>)=>void;onClose:()=>void;onSubmit:()=>void}){const complete=quiz.questoes_snapshot.every(question=>answers[question.id]);return<div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4"><div role="dialog" aria-modal="true" aria-label="Avaliação conceitual" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-violet-600">Tentativa {quiz.numero_tentativa}</p><h2 className="mt-1 font-serif text-2xl text-[#102f4a]">Avaliação conceitual</h2></div><button onClick={onClose} className="text-xl text-slate-400">×</button></div><div className="mt-5 space-y-5">{quiz.questoes_snapshot.map((question,index)=><fieldset key={question.id}><legend className="text-sm font-semibold text-slate-800">{index+1}. {question.enunciado}</legend><div className="mt-2 space-y-2">{question.alternativas.map(alternative=><label key={alternative.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-xs ${answers[question.id]===alternative.id?'border-violet-400 bg-violet-50':'border-slate-200'}`}><input type="radio" name={`q-${question.id}`} checked={answers[question.id]===alternative.id} onChange={()=>setAnswers({...answers,[question.id]:alternative.id})}/>{alternative.texto}</label>)}</div></fieldset>)}</div><div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4"><p className="text-[10px] text-slate-500">Ordem de questões e alternativas randomizada.</p><button onClick={onSubmit} disabled={!complete} className="rounded-xl bg-violet-600 px-5 py-2.5 text-xs font-semibold text-white disabled:opacity-40">Finalizar prova</button></div></div></div>}
