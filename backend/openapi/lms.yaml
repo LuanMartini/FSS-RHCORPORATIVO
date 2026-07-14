@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: RH Corporativo - LMS API
+  version: 1.0.0
+  description: Trilhas lineares, presença auditável em vídeo, provas randomizadas e gamificação.
+servers:
+  - url: /api
+security:
+  - bearerAuth: []
+paths:
+  /lms/dashboard:
+    get:
+      summary: Retorna trilha, aulas, progresso, badges e ranking
+      parameters:
+        - { name: colaboradorId, in: query, schema: { type: integer } }
+        - { name: trilhaId, in: query, schema: { type: integer } }
+        - { name: periodo, in: query, schema: { type: string, enum: [SEMANAL, MENSAL], default: SEMANAL } }
+      responses:
+        '200':
+          description: Snapshot do LMS com os módulos já avaliados quanto ao desbloqueio.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /lms/aulas/{aulaId}/progresso:
+    post:
+      summary: Sincroniza uma janela parcial de presença no vídeo
+      parameters:
+        - { name: aulaId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VideoSync' }
+      responses:
+        '200': { description: Progresso e matrícula atualizados atomicamente. }
+        '409': { description: Salto de vídeo, versão ou evento conflitante. }
+        '422': { description: Janela de presença inválida. }
+  /lms/cursos/{cursoId}/prova/iniciar:
+    post:
+      summary: Cria ou retoma tentativa com questões e alternativas randomizadas
+      parameters:
+        - { name: cursoId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [colaboradorId]
+              properties:
+                colaboradorId: { type: integer }
+      responses:
+        '200':
+          description: Snapshot imutável da tentativa, sem o gabarito.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizAttempt' }
+        '409': { description: Vídeo incompleto, prova já concluída ou tentativas esgotadas. }
+  /lms/tentativas/{tentativaId}/responder:
+    post:
+      summary: Corrige a prova e conclui curso, XP e badges em uma transação
+      parameters:
+        - { name: tentativaId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [colaboradorId, respostas]
+              properties:
+                colaboradorId: { type: integer }
+                respostas:
+                  type: array
+                  items:
+                    type: object
+                    required: [questaoId, alternativaId]
+                    properties:
+                      questaoId: { type: integer }
+                      alternativaId: { type: integer }
+      responses:
+        '200':
+          description: Resultado calculado com nota centesimal.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grade: { type: number }
+                  approved: { type: boolean }
+                  correct: { type: integer }
+                  total: { type: integer }
+                  cursoId: { type: integer }
+        '409': { description: Tentativa finalizada ou expirada. }
+  /lms/badges/{badgeId}/svg:
+    get:
+      summary: Renderiza a medalha dinâmica em SVG
+      parameters:
+        - { name: badgeId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Badge acessível, cacheável e gerado a partir do cadastro.
+          content:
+            image/svg+xml:
+              schema: { type: string }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Unauthorized: { description: Token JWT ausente ou inválido. }
+  schemas:
+    VideoSync:
+      type: object
+      required: [colaboradorId, segundoAtual, deltaAssistido, abaAtiva, visibilidade, idempotencia, sequencia]
+      properties:
+        colaboradorId: { type: integer }
+        segundoAtual: { type: number, minimum: 0 }
+        deltaAssistido: { type: number, minimum: 0, maximum: 7.5 }
+        abaAtiva: { type: boolean }
+        visibilidade: { type: string, enum: [visible, hidden] }
+        idempotencia: { type: string, format: uuid }
+        sequencia: { type: integer, minimum: 0 }
+    QuizAttempt:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        numero_tentativa: { type: integer }
+        expira_em: { type: string, format: date-time }
+        questoes_snapshot:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              enunciado: { type: string }
+              alternativas:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    texto: { type: string }
+    Dashboard:
+      type: object
+      additionalProperties: true
+      required: [collaborators, trails, courses, lessons, badges, leaderboard, xp]

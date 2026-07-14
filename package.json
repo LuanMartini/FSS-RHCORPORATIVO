@@ -11,6 +11,6 @@
     "build": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint",
     "test": "npm --prefix backend test",
-    "check": "npm run lint && npm run test && npm run build"
+    "check": "npm run lint && npm --prefix backend run typecheck && npm run test && npm run build"
   }
 }

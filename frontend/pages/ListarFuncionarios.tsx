@@ -30,8 +30,8 @@ export default function ListarFuncionarios({ funcionarios, onRefresh }: Props) {
       <h2 className="font-serif text-2xl text-[#0f2340] mb-4">Funcionários</h2>
       {erro && <p className="text-red-600 text-sm mb-3">{erro}</p>}
 
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm" role="region" aria-label="Lista de funcionários" tabIndex={0}>
+        <table className="min-w-[900px] w-full text-sm">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="text-left px-4 py-3 font-semibold text-slate-600">Nome</th>

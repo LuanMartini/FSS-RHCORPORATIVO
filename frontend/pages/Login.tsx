@@ -18,7 +18,7 @@ export default function Login({ onSwitch, canRegister }: Props) {
     setError('');
     setLoading(true);
     try {
-      const data = await apiFetch<{ token: string; usuario: { nome: string; email: string } }>('/login', {
+      const data = await apiFetch<{ token: string; usuario: { nome: string; email: string; perfil: string; permissoes: string[] } }>('/login', {
         method: 'POST',
         body: JSON.stringify(form),
       });

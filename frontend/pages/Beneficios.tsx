@@ -1,162 +1,44 @@
-import { useState, useEffect, type FormEvent } from 'react';
-import { apiFetch } from '../services/api';
-import type { FuncionarioView } from '../utils/funcionario';
+import {useCallback,useEffect,useMemo,useRef,useState,type ChangeEvent} from 'react';
+import {apiFetch,apiFormData} from '../services/api';
+import type {BenefitCategory,CardTransaction,FlexBenefitsDashboard,Reimbursement} from '../types/flexBenefits';
 
-interface Beneficio {
-  id: number;
-  nome: string;
-  tipo: string;
-  valorMensal: number;
+const CATEGORIES:{id:BenefitCategory;label:string;description:string;color:string;track:string}[]=[
+  {id:'VALE_REFEICAO',label:'Vale Refeição',description:'Restaurantes e alimentação',color:'bg-amber-500',track:'accent-amber-500'},
+  {id:'MOBILIDADE',label:'Mobilidade',description:'Transporte e deslocamento',color:'bg-sky-500',track:'accent-sky-500'},
+  {id:'SAUDE',label:'Saúde',description:'Bem-estar e assistência',color:'bg-emerald-500',track:'accent-emerald-500'},
+  {id:'EDUCACAO',label:'Educação',description:'Cursos e desenvolvimento',color:'bg-violet-500',track:'accent-violet-500'},
+];
+const money=(cents:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(cents/100);
+const num=(value:unknown)=>Number(value??0);
+const statusLabel:Record<string,string>={PENDENTE:'Pendente',EM_CONCILIACAO:'Em conciliação',CONCILIADA:'Conciliada',PENDENTE_GESTOR:'Aguardando gestor',PENDENTE_DIRETORIA:'Aguardando diretoria',APROVADO:'Aprovado',REJEITADO:'Rejeitado'};
+
+export default function Beneficios(){
+  const [data,setData]=useState<FlexBenefitsDashboard|null>(null);const [collaboratorId,setCollaboratorId]=useState<number|null>(null);const [allocations,setAllocations]=useState<Record<BenefitCategory,number>>({VALE_REFEICAO:0,MOBILIDADE:0,SAUDE:0,EDUCACAO:0});const [selected,setSelected]=useState<CardTransaction|null>(null);const [standalone,setStandalone]=useState(false);const [file,setFile]=useState<File|null>(null);const [preview,setPreview]=useState('');const [category,setCategory]=useState('MOBILIDADE');const [description,setDescription]=useState('');const [amount,setAmount]=useState('');const [loading,setLoading]=useState(true);const [saving,setSaving]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
+  const walletOperationKey=useRef(crypto.randomUUID());const reimbursementKey=useRef(crypto.randomUUID());
+  const load=useCallback(async()=>{setLoading(true);try{const query=collaboratorId?`?colaboradorId=${collaboratorId}`:'';const response=await apiFetch<FlexBenefitsDashboard>(`/flex-benefits/dashboard${query}`);setData(response);setCollaboratorId((current)=>current??num(response.wallet?.colaborador_id??response.collaborators[0]?.id));const next={VALE_REFEICAO:0,MOBILIDADE:0,SAUDE:0,EDUCACAO:0} as Record<BenefitCategory,number>;for(const item of response.allocations)next[item.categoria]=num(item.valor_centavos);const walletTotal=num(response.wallet?.saldo_total_centavos);for(const limit of response.limits)if(!response.allocations.some((item)=>item.categoria===limit.category))next[limit.category]=Math.max(num(limit.minimumCents),Math.ceil(walletTotal*num(limit.minimumPercent)/100));setAllocations(next);setError('');}catch(err){setError(err instanceof Error?err.message:'Falha ao carregar benefícios.');}finally{setLoading(false);}},[collaboratorId]);
+  useEffect(()=>{void load();},[load]);
+  useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
+  const total=num(data?.wallet?.saldo_total_centavos);const allocated=Object.values(allocations).reduce((sum,value)=>sum+value,0);const available=total-allocated;
+  const limits=useMemo(()=>new Map((data?.limits??[]).map((item)=>[item.category,item])),[data?.limits]);
+  const changeAllocation=(categoryId:BenefitCategory,requested:number)=>{const limit=limits.get(categoryId);if(!limit||!total)return;const min=Math.max(num(limit.minimumCents),Math.ceil(total*num(limit.minimumPercent)/100));const max=Math.min(limit.maximumCents===null?total:num(limit.maximumCents),Math.floor(total*num(limit.maximumPercent)/100));setAllocations((current)=>{const next={...current};const currentlyAllocated=Object.values(current).reduce((sum,value)=>sum+value,0);const currentlyAvailable=total-currentlyAllocated;const target=Math.max(min,Math.min(max,Math.round(requested)));let increase=Math.max(0,target-next[categoryId]-currentlyAvailable);if(increase>0){for(const other of CATEGORIES.filter((item)=>item.id!==categoryId)){const otherLimit=limits.get(other.id);if(!otherLimit)continue;const otherMin=Math.max(num(otherLimit.minimumCents),Math.ceil(total*num(otherLimit.minimumPercent)/100));const reducible=Math.max(0,next[other.id]-otherMin);const reduction=Math.min(reducible,increase);next[other.id]-=reduction;increase-=reduction;if(increase===0)break;}}next[categoryId]=Math.min(target,next[categoryId]+Math.max(0,target-next[categoryId]-increase));return next;});};
+  const saveWallet=async()=>{if(!data?.wallet)return;setSaving(true);try{await apiFetch(`/flex-benefits/carteiras/${data.wallet.id}/distribuicao`,{method:'PUT',body:JSON.stringify({versao:num(data.wallet.versao),idempotencia:walletOperationKey.current,alocacoes:CATEGORIES.map((item)=>({categoria:item.id,valorCentavos:allocations[item.id]}))})});walletOperationKey.current=crypto.randomUUID();setNotice('Nova distribuição reservada com controle transacional.');await load();}catch(err){setError(err instanceof Error?err.message:'Falha ao salvar carteira.');}finally{setSaving(false);}};
+  const selectTransaction=(transaction:CardTransaction)=>{setSelected(transaction);setStandalone(false);setCategory(transaction.categoria_sugerida||'OUTROS');setAmount(String(num(transaction.valor_centavos)/100));setDescription(`Despesa em ${transaction.estabelecimento}`);setFile(null);setPreview('');};
+  const chooseFile=(event:ChangeEvent<HTMLInputElement>)=>{const selectedFile=event.target.files?.[0]??null;setFile(selectedFile);if(preview)URL.revokeObjectURL(preview);setPreview(selectedFile&&selectedFile.type.startsWith('image/')?URL.createObjectURL(selectedFile):'');};
+  const submitReceipt=async()=>{if(!file||(!selected&&!standalone))return;setSaving(true);try{const form=new FormData();form.append('comprovante',file);form.append('colaboradorId',String(collaboratorId));form.append('categoria',category);form.append('descricao',description);form.append('valorCentavos',String(Math.round(Number(amount)*100)));form.append('idempotencia',reimbursementKey.current);if(selected)form.append('transacaoCartaoId',String(selected.id));const result=await apiFormData<{ocr:{cnpj:string|null;date:string;amountCents:number;confidence:number};approvalFlow:string[]}>('/flex-benefits/reembolsos',form);reimbursementKey.current=crypto.randomUUID();setNotice(`OCR ${result.ocr.confidence}%: ${money(result.ocr.amountCents)} · fluxo ${result.approvalFlow.join(' → ')}.`);setSelected(null);setStandalone(false);setFile(null);setPreview('');await load();}catch(err){setError(err instanceof Error?err.message:'Falha ao enviar comprovante.');}finally{setSaving(false);}};
+  if(loading&&!data)return <p className="text-sm text-slate-500">Carregando portal financeiro…</p>;
+  const pending=(data?.transactions??[]).filter((item)=>item.status==='PENDENTE');
+  return <div className="mx-auto max-w-[1500px] space-y-6">
+    <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><p className="text-[11px] font-semibold uppercase tracking-[.22em] text-emerald-600">Total Rewards · Expense Intelligence</p><h1 className="mt-1 font-serif text-3xl font-semibold text-[#102f4a]">Benefícios & Reembolsos</h1><p className="mt-1 text-sm text-slate-500">Distribua sua carteira e concilie despesas corporativas com segurança.</p></div><select value={collaboratorId??''} onChange={(event)=>setCollaboratorId(Number(event.target.value))} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm">{data?.collaborators.map((item)=><option key={item.id} value={item.id}>{item.nome}</option>)}</select></header>
+    {(error||notice)&&<div className={`flex items-center justify-between rounded-xl border px-4 py-3 text-xs ${error?'border-rose-200 bg-rose-50 text-rose-700':'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><span>{error||notice}</span><button type="button" onClick={()=>{setError('');setNotice('')}}>×</button></div>}
+    <section className="overflow-hidden rounded-2xl bg-[#102f4a] text-white shadow-lg"><div className="grid gap-6 p-6 lg:grid-cols-[260px_1fr]"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-emerald-300">Carteira mensal</p><p className="mt-2 font-serif text-4xl font-semibold">{money(total)}</p><p className="mt-1 text-xs text-slate-300">{money(available)} ainda disponível para alocação</p><div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{width:`${total?allocated/total*100:0}%`}}/></div><div className="mt-2 flex justify-between text-[10px] text-slate-400"><span>{(total?allocated/total*100:0).toFixed(0)}% distribuído</span><span>Versão {data?.wallet?.versao??'—'}</span></div></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{CATEGORIES.map((item)=><WalletSlider key={item.id} item={item} value={allocations[item.id]} total={total} limit={limits.get(item.id)} onChange={(value)=>changeAllocation(item.id,value)}/>)}</div></div><div className="flex items-center justify-between border-t border-white/10 bg-white/5 px-6 py-4"><p className="text-[11px] text-slate-300">Valores tributáveis são sinalizados conforme parametrização vigente do RH.</p><button type="button" onClick={()=>void saveWallet()} disabled={saving||!data?.wallet} className="rounded-xl bg-emerald-400 px-5 py-2.5 text-xs font-bold text-[#102f4a] hover:bg-emerald-300 disabled:opacity-40">Confirmar distribuição</button></div></section>
+    <section><div className="mb-3 flex items-end justify-between"><div><h2 className="text-lg font-semibold text-slate-900">Conciliação de cartão corporativo</h2><p className="text-xs text-slate-500">Selecione uma transação e associe um comprovante do mesmo valor.</p></div><button type="button" onClick={()=>{setStandalone(true);setSelected(null);setAmount('');setDescription('');setCategory('OUTROS')}} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-300">+ Despesa avulsa</button></div>
+      <div className="grid min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[minmax(360px,44%)_1fr]"><div className="border-b border-slate-200 bg-slate-50/70 lg:border-b-0 lg:border-r"><div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><p className="text-sm font-semibold text-slate-800">Extrato pendente</p><p className="text-[10px] text-slate-500">Cartão final 4821</p></div><span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-700">{pending.length} pendentes</span></div><div className="divide-y divide-slate-200">{pending.map((transaction)=><button type="button" key={transaction.id} onClick={()=>selectTransaction(transaction)} className={`flex w-full items-center gap-3 px-5 py-4 text-left transition ${selected?.id===transaction.id?'bg-emerald-50 ring-1 ring-inset ring-emerald-200':'hover:bg-white'}`}><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-sm shadow-sm">{transaction.categoria_sugerida==='MOBILIDADE'?'↗':'●'}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{transaction.estabelecimento}</p><p className="mt-0.5 text-[10px] text-slate-500">{new Date(transaction.transacionado_em).toLocaleDateString('pt-BR')} · {transaction.categoria_sugerida}</p></div><p className="text-sm font-bold text-slate-900">{money(num(transaction.valor_centavos))}</p></button>)}</div></div>
+        <div className="p-5 sm:p-7">{selected||standalone?<div className="mx-auto max-w-xl"><div className="flex items-start justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-emerald-600">{selected?'Vincular comprovante':'Novo reembolso'}</p><h3 className="mt-1 text-xl font-semibold text-[#102f4a]">{selected?.estabelecimento??'Despesa avulsa'}</h3></div>{selected&&<span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">{money(num(selected.valor_centavos))}</span>}</div><label className={`mt-5 flex min-h-44 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed p-5 text-center transition ${file?'border-emerald-300 bg-emerald-50':'border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'}`}>{preview?<img src={preview} alt="Prévia do comprovante" className="max-h-36 rounded-lg object-contain"/>:<><span className="text-3xl">⌁</span><p className="mt-2 text-sm font-semibold text-slate-700">{file?file.name:'Solte ou selecione o comprovante'}</p><p className="mt-1 text-[10px] text-slate-500">JPG, PNG ou PDF · até 10 MB · OCR automático</p></>}<input type="file" accept="image/jpeg,image/png,application/pdf" onChange={chooseFile} className="hidden"/></label><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Categoria<select value={category} onChange={(event)=>setCategory(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal normal-case text-slate-700"><option value="MOBILIDADE">Mobilidade</option><option value="PASSAGEM">Passagem</option><option value="ALIMENTACAO">Alimentação</option><option value="HOSPEDAGEM">Hospedagem</option><option value="SAUDE">Saúde</option><option value="EDUCACAO">Educação</option><option value="OUTROS">Outros</option></select></label><label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Valor exato<input type="number" step="0.01" value={amount} readOnly={Boolean(selected)} onChange={(event)=>setAmount(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-700 read-only:bg-slate-50"/></label></div><label className="mt-4 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Justificativa<textarea value={description} onChange={(event)=>setDescription(event.target.value)} rows={3} className="mt-1.5 w-full rounded-xl border border-slate-200 p-3 text-sm font-normal normal-case text-slate-700"/></label><div className="mt-5 flex items-center justify-between"><p className="text-[10px] text-slate-500">{Number(amount)>500?'Exige Gestor + Diretoria':'Exige aprovação do Gestor'}</p><button type="button" onClick={()=>void submitReceipt()} disabled={!file||!description.trim()||!Number(amount)||saving} className="rounded-xl bg-[#102f4a] px-5 py-2.5 text-xs font-semibold text-white disabled:opacity-40">Enviar para conciliação</button></div></div>:<EmptyReconciliation/>}</div></div>
+    </section>
+    <section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-sm font-semibold text-slate-900">Solicitações recentes</h2><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{(data?.reimbursements??[]).map((item)=><ReimbursementCard key={item.id} item={item}/>)||null}{!data?.reimbursements.length&&<p className="text-xs text-slate-400">Nenhum reembolso enviado.</p>}</div></section>
+  </div>;
 }
 
-interface Props {
-  funcionarios: FuncionarioView[];
-  onRefresh: () => void;
-}
-
-export default function Beneficios({ funcionarios, onRefresh }: Props) {
-  const [lista, setLista] = useState<Beneficio[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState('');
-  const [novo, setNovo] = useState({ nome: '', tipo: '', valorMensal: '' });
-  const [vinc, setVinc] = useState({ funcionarioId: '', beneficioId: '' });
-
-  async function carregar() {
-    try {
-      const data = await apiFetch<Beneficio[]>('/rh/beneficios');
-      setLista(data);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao carregar benefícios');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    carregar();
-  }, []);
-
-  async function criar(e: FormEvent) {
-    e.preventDefault();
-    setErro('');
-    try {
-      await apiFetch('/rh/beneficios', {
-        method: 'POST',
-        body: JSON.stringify({
-          nome: novo.nome,
-          tipo: novo.tipo,
-          valorMensal: Number(novo.valorMensal),
-        }),
-      });
-      setNovo({ nome: '', tipo: '', valorMensal: '' });
-      await carregar();
-      onRefresh();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao criar');
-    }
-  }
-
-  async function vincular(e: FormEvent) {
-    e.preventDefault();
-    setErro('');
-    try {
-      await apiFetch('/rh/beneficios/vincular', {
-        method: 'POST',
-        body: JSON.stringify({
-          funcionarioId: Number(vinc.funcionarioId),
-          beneficioId: Number(vinc.beneficioId),
-        }),
-      });
-      setVinc({ funcionarioId: '', beneficioId: '' });
-      onRefresh();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao vincular');
-    }
-  }
-
-  if (loading) return <p className="text-slate-500">Carregando...</p>;
-
-  return (
-    <div className="space-y-8 max-w-4xl">
-      <h2 className="font-serif text-2xl text-[#0f2340]">Benefícios</h2>
-      {erro && <p className="text-red-600 text-sm">{erro}</p>}
-
-      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold">Cadastrar benefício</h3>
-        <form onSubmit={criar} className="flex flex-wrap gap-2 items-end">
-          <input
-            required
-            placeholder="Nome"
-            value={novo.nome}
-            onChange={e => setNovo({ ...novo, nome: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[140px]"
-          />
-          <input
-            required
-            placeholder="Tipo (ex: VR)"
-            value={novo.tipo}
-            onChange={e => setNovo({ ...novo, tipo: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm w-28"
-          />
-          <input
-            required
-            type="number"
-            placeholder="Valor mensal"
-            value={novo.valorMensal}
-            onChange={e => setNovo({ ...novo, valorMensal: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm w-36"
-          />
-          <button type="submit" className="px-4 py-2 bg-[#0f2340] text-white rounded-lg text-sm">Incluir</button>
-        </form>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold">Vincular a funcionário</h3>
-        <form onSubmit={vincular} className="flex flex-wrap gap-2 items-end">
-          <select
-            required
-            value={vinc.funcionarioId}
-            onChange={e => setVinc({ ...vinc, funcionarioId: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="">Funcionário</option>
-            {funcionarios.map(f => (
-              <option key={f.id} value={f.id}>{f.nome}</option>
-            ))}
-          </select>
-          <select
-            required
-            value={vinc.beneficioId}
-            onChange={e => setVinc({ ...vinc, beneficioId: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="">Benefício</option>
-            {lista.map(b => (
-              <option key={b.id} value={b.id}>{b.nome}</option>
-            ))}
-          </select>
-          <button type="submit" className="px-4 py-2 bg-slate-700 text-white rounded-lg text-sm">Vincular</button>
-        </form>
-      </div>
-
-      <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="text-left px-4 py-2">Nome</th>
-            <th className="text-left px-4 py-2">Tipo</th>
-            <th className="text-left px-4 py-2">Valor mensal</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lista.map(b => (
-            <tr key={b.id} className="border-t border-slate-100">
-              <td className="px-4 py-2">{b.nome}</td>
-              <td className="px-4 py-2">{b.tipo}</td>
-              <td className="px-4 py-2">{b.valorMensal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+function WalletSlider({item,value,total,limit,onChange}:{item:(typeof CATEGORIES)[number];value:number;total:number;limit:FlexBenefitsDashboard['limits'][number]|undefined;onChange:(value:number)=>void}){const min=limit?Math.max(num(limit.minimumCents),Math.ceil(total*num(limit.minimumPercent)/100)):0;const max=limit?Math.min(limit.maximumCents===null?total:num(limit.maximumCents),Math.floor(total*num(limit.maximumPercent)/100)):total;return <div className="rounded-xl bg-white/8 p-3.5"><div className="flex items-center justify-between"><span className={`h-2.5 w-2.5 rounded-full ${item.color}`}/>{limit?.taxable&&<span className="rounded bg-amber-300/15 px-1.5 py-0.5 text-[8px] font-bold uppercase text-amber-200">Tributável</span>}</div><p className="mt-3 text-xs font-semibold">{item.label}</p><p className="text-[9px] text-slate-400">{item.description}</p><p className="mt-3 text-lg font-bold">{money(value)}</p><input aria-label={item.label} type="range" min={min} max={max} step="100" value={Math.min(max,Math.max(min,value))} onChange={(event)=>onChange(Number(event.target.value))} className={`mt-2 h-1.5 w-full cursor-pointer ${item.track}`}/><div className="mt-1 flex justify-between text-[8px] text-slate-400"><span>{limit?.minimumPercent??0}% mín.</span><span>{limit?.maximumPercent??100}% máx.</span></div></div>}
+function EmptyReconciliation(){return <div className="flex h-full min-h-96 flex-col items-center justify-center text-center"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-2xl text-slate-400">▣</div><h3 className="mt-4 text-sm font-semibold text-slate-700">Selecione uma transação</h3><p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-500">O valor será bloqueado para edição e o comprovante deverá corresponder exatamente ao lançamento.</p></div>}
+function ReimbursementCard({item}:{item:Reimbursement}){return <div className="rounded-xl border border-slate-200 p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{item.descricao}</p><p className="mt-1 text-[10px] text-slate-500">{item.categoria} · OCR {num(item.ocr_confianca).toFixed(0)}%</p></div><span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-semibold text-slate-600">{statusLabel[item.status]??item.status}</span></div><div className="mt-3 flex items-center justify-between"><strong className="text-sm text-[#102f4a]">{money(num(item.valor_solicitado_centavos))}</strong><span className="text-[9px] text-slate-400">Etapa {item.nivel_atual}/{item.total_niveis}</span></div></div>}

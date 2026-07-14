@@ -2,23 +2,20 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { AuthContext } from './authState';
 import type { User } from './authState';
+import { setAccessToken } from '../services/api';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
-  const [user, setUser] = useState<User | null>(() => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
-  });
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
 
   const login = (tk: string, usr: User) => {
-    localStorage.setItem('token', tk);
-    localStorage.setItem('user', JSON.stringify(usr));
+    setAccessToken(tk);
     setToken(tk);
     setUser(usr);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    setAccessToken(null);
     setToken(null);
     setUser(null);
   };

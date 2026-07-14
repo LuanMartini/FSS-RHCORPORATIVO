@@ -7,8 +7,8 @@ test('calcula FGTS sobre salario base', () => {
 });
 
 test('calcula INSS progressivo com teto', () => {
-  assert.equal(calcularINSS(12000).toFixed(2), '908.86');
-  assert.equal(calcularINSS(1412).toFixed(2), '105.90');
+  assert.equal(calcularINSS(12000).toFixed(2), '988.09');
+  assert.equal(calcularINSS(1621).toFixed(2), '121.58');
 });
 
 test('calcula IRRF zerado para base isenta', () => {

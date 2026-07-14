@@ -215,26 +215,34 @@ async function runMysql() {
   for (const s of mysqlStmts) await execRaw(s);
 }
 
-export async function ensureSchema() {
+export async function ensureBaseSchema() {
   if (isMysql) await runMysql();
   else await runPg();
 }
 
+// Compatibilidade para ferramentas antigas. A API nao chama este metodo.
+export const ensureSchema = ensureBaseSchema;
+
 export async function seedIfEmpty() {
   if ((await countTable('usuarios')) === 0) {
+    if (process.env.NODE_ENV === 'production' && !process.env.SEED_ADMIN_PASSWORD) {
+      throw new Error('SEED_ADMIN_PASSWORD e obrigatoria para seed explicito em producao.');
+    }
     const hash = await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || 'admin123', 10);
     const email = process.env.SEED_ADMIN_EMAIL || 'admin@empresa.com';
     await run(
-      'INSERT INTO usuarios (nome, email, senha_hash) VALUES (?, ?, ?)',
+      isMysql
+        ? 'INSERT INTO usuarios (nome, email, senha_hash) VALUES (?, ?, ?)'
+        : "INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES (?, ?, ?, 'ADMINISTRADOR')",
       ['Administrador', email, hash]
     );
   }
 
   if ((await countTable('departamentos')) === 0) {
     await run(
-      `INSERT INTO departamentos (nome, sigla) VALUES
-       (?, ?), (?, ?), (?, ?)`,
-      ['Recursos Humanos', 'RH', 'Tecnologia', 'TI', 'Financeiro', 'FIN']
+      `INSERT INTO departamentos (nome, sigla, codigo) VALUES
+       (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
+      ['Recursos Humanos', 'RH', 'RH', 'Tecnologia', 'TI', 'TI', 'Financeiro', 'FIN', 'FIN']
     );
   }
 
@@ -315,6 +323,52 @@ export async function seedIfEmpty() {
     );
   }
 
+  if (!isMysql) {
+    await run(
+      `INSERT INTO colaboradores
+       (nome_completo, cpf, email, telefone, data_nascimento, cargo_id, departamento_id, salario, data_admissao, status, etapa_admissao)
+       SELECT f.nome, f.cpf, f.email, f.telefone, f.data_nascimento, f.cargo_id, f.departamento_id, f.salario,
+              CURRENT_DATE, CASE WHEN f.status = 'ATIVO' THEN 'ATIVO' ELSE 'AFASTADO' END, 'CONCLUIDA'
+       FROM funcionarios f
+       ON CONFLICT (cpf) DO NOTHING`
+    );
+    await run(
+      `INSERT INTO matriculas_cursos (colaborador_id, curso_id)
+       SELECT c.id, curso.id FROM colaboradores c CROSS JOIN cursos curso
+       WHERE c.status = 'ATIVO' AND curso.ativo
+       ON CONFLICT (colaborador_id, curso_id) DO NOTHING`
+    );
+    await run(
+      `INSERT INTO usuarios_colaboradores (usuario_id,colaborador_id)
+       SELECT u.id,c.id FROM usuarios u JOIN colaboradores c ON lower(c.email)=lower(u.email)
+       ON CONFLICT DO NOTHING`
+    );
+    await run(
+      `INSERT INTO usuarios_colaboradores (usuario_id,colaborador_id)
+       SELECT u.id,c.id FROM usuarios u
+       CROSS JOIN LATERAL (SELECT c0.id FROM colaboradores c0 WHERE c0.status='ATIVO'
+         AND NOT EXISTS (SELECT 1 FROM usuarios_colaboradores uc0 WHERE uc0.colaborador_id=c0.id)
+         ORDER BY c0.id LIMIT 1) c
+       WHERE NOT EXISTS (SELECT 1 FROM usuarios_colaboradores uc WHERE uc.usuario_id=u.id)
+         AND NOT EXISTS (SELECT 1 FROM usuarios_colaboradores uc WHERE uc.colaborador_id=c.id)
+       ON CONFLICT DO NOTHING`
+    );
+    await run(
+      `INSERT INTO historico_contratos
+       (colaborador_id,departamento_id,cargo_id,salario_centavos,data_admissao,data_desligamento,
+        desligamento_voluntario,tipo_contrato,vigencia,fonte)
+       SELECT c.id,c.departamento_id,c.cargo_id,round(COALESCE(c.salario,0)*100)::bigint,
+              COALESCE(c.data_admissao,c.created_at::date),
+              CASE WHEN c.status='DESLIGADO' THEN c.updated_at::date ELSE NULL END,
+              NULL,'CLT',daterange(COALESCE(c.data_admissao,c.created_at::date),
+                CASE WHEN c.status='DESLIGADO' THEN c.updated_at::date + 1 ELSE NULL END,'[)'),
+              'SINCRONIZACAO_CORE'
+       FROM colaboradores c
+       WHERE c.departamento_id IS NOT NULL AND c.cargo_id IS NOT NULL
+       ON CONFLICT (colaborador_id,data_admissao,versao) DO NOTHING`
+    );
+  }
+
   if ((await countTable('beneficios')) === 0) {
     await run(
       `INSERT INTO beneficios (nome, tipo, valor_mensal) VALUES
@@ -387,7 +441,7 @@ async function getDepartamentoIds() {
 async function ensureDepartamento(nome, sigla) {
   const rows = await all('SELECT id FROM departamentos WHERE sigla = ? LIMIT 1', [sigla]);
   if (rows.length > 0) return rows[0].id;
-  await run('INSERT INTO departamentos (nome, sigla) VALUES (?, ?)', [nome, sigla]);
+  await run('INSERT INTO departamentos (nome, sigla, codigo) VALUES (?, ?, ?)', [nome, sigla, sigla]);
   const created = await all('SELECT id FROM departamentos WHERE sigla = ? LIMIT 1', [sigla]);
   return created[0]?.id;
 }

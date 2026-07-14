@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: RHCorp Payroll API
+  version: 1.0.0
+  description: API administrativa de folha. Eventos eSocial sao gravados em outbox; nao sao transmitidos por este modulo.
+servers:
+  - url: http://localhost:3333
+security:
+  - bearerAuth: []
+paths:
+  /payroll/dashboard:
+    get:
+      summary: Consolida KPIs, distribuicao por departamento e historico
+      parameters:
+        - in: query
+          name: competencia
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '200': { description: Dashboard da folha }
+  /payroll/processamentos:
+    post:
+      summary: Cria uma versao da folha e publica um job na fila duravel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [competencia]
+              properties:
+                competencia: { type: string, example: '2026-07' }
+      responses:
+        '202': { description: Job aceito }
+        '400': { description: Competencia ou tabela tributaria invalida }
+  /payroll/processamentos/{id}:
+    get:
+      summary: Consulta progresso persistido
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Processamento }
+        '404': { description: Nao encontrado }
+  /payroll/processamentos/{id}/enviar-banco:
+    post:
+      summary: Marca remessa bancaria e prepara eventos S-1210
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dataPagamento]
+              properties:
+                dataPagamento: { type: string, format: date }
+      responses:
+        '202': { description: Remessa registrada }
+        '409': { description: Folha ainda nao concluida ou com falhas }
+  /payroll/contracheques/{id}/pdf:
+    get:
+      summary: Abre o PDF de holerite descriptografado sob autenticacao
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf: {}
+  /payroll/simular:
+    post:
+      summary: Executa o motor puro com as tabelas brasileiras de 2026
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [salarioBase]
+              properties:
+                salarioBase: { type: string, example: '7607.20' }
+                dependentes: { type: integer, minimum: 0 }
+                faltas: { type: string, example: '0.00' }
+                valeTransporte: { type: string, example: '350.00' }
+                valeRefeicao: { type: string, example: '80.00' }
+                pensao: { type: string, example: '0.00' }
+      responses:
+        '200': { description: Memoria detalhada de calculo }
+components:
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer, minimum: 1 }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 
 const commands = [
   ['backend', 'npm', ['--prefix', 'backend', 'run', 'dev']],
+  ['payroll-worker', 'npm', ['--prefix', 'backend', 'run', 'worker']],
   ['frontend', 'npm', ['--prefix', 'frontend', 'run', 'dev']],
 ];
 
