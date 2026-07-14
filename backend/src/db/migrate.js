@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { getPool, isMysql } from './client.js';
 import { ensureBaseSchema } from './schema.js';
 
@@ -69,7 +70,7 @@ export async function assertSchemaCurrent() {
   }
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replaceAll('\\','/')}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   migrate()
     .then(async (result) => {
       console.log(result.applied.length ? `Migracoes aplicadas: ${result.applied.join(', ')}` : 'Banco ja esta atualizado.');
