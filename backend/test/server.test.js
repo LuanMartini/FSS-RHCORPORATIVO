@@ -134,3 +134,14 @@ test('painel de auditoria exige autenticacao', async () => {
     await close(server);
   }
 });
+
+test('exportacao de privacidade exige autenticacao', async () => {
+  const server = await listen(createApp());
+  const address = server.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/privacidade/me/exportacao`);
+    assert.equal(response.status, 401);
+  } finally {
+    await close(server);
+  }
+});

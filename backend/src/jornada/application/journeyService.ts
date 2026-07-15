@@ -74,8 +74,8 @@ function mapCollaborator(row: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
-export async function listCollaborators(): Promise<Record<string, unknown>[]> {
-  return (await repository.listCollaborators()).map(mapCollaborator);
+export async function listCollaborators(scope:{managerId:number|null;all:boolean}): Promise<Record<string, unknown>[]> {
+  return (await repository.listCollaborators(scope)).map(mapCollaborator);
 }
 
 export async function getConfiguration(collaboratorIdValue: unknown): Promise<Record<string, unknown>> {

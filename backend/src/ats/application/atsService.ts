@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { removeEncrypted, saveEncrypted, sha256 } from '../../core/infrastructure/encryptedFileStorage.js';
 import { calculateMatch } from '../domain/matchEngine.js';
+import { scanBuffer } from '../../security/malwareScanner.js';
 import { ATS_STAGES, type AtsStage, type MoveCardInput } from '../domain/types.js';
 import { prepareCalendarEvent } from '../infrastructure/calendarAdapter.js';
 import { parseResume, validateResumeFile } from '../infrastructure/resumeParser.js';
@@ -51,6 +52,7 @@ export async function uploadResume(vacancyIdInput: unknown, userId: number, file
   await repository.assertVacancyPermission(userId, vacancyId, true);
   if (!file) throw Object.assign(new Error('Curriculo obrigatorio.'), { status: 400 });
   validateResumeFile(file.buffer, file.mimetype, file.size);
+  await scanBuffer(file.buffer,{filename:file.originalname,mime:file.mimetype});
   const vacancy = await repository.getVacancy(vacancyId);
   if (!vacancy) throw Object.assign(new Error('Vaga nao encontrada.'), { status: 404 });
   const { text, profile } = await parseResume(file.buffer, file.mimetype);

@@ -2,9 +2,10 @@ import { Router, raw } from 'express';
 import { authMiddleware } from '../../middleware/auth.js';
 import { authorize } from '../../middleware/authorization.js';
 import * as controller from './coreController.js';
+import { publicSignatureRateLimit } from '../../middleware/security.js';
 
 export const publicCoreRoutes = Router();
-publicCoreRoutes.post('/assinaturas/:token/confirmar', controller.confirmSignature);
+publicCoreRoutes.post('/assinaturas/:token/confirmar', publicSignatureRateLimit, controller.confirmSignature);
 
 const coreRoutes = Router();
 coreRoutes.use(authMiddleware);

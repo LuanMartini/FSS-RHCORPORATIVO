@@ -4,6 +4,7 @@ import { AppError, assertFound } from '../domain/errors.js';
 import * as repository from '../infrastructure/coreRepository.js';
 import { simulateOcr } from '../infrastructure/ocrSimulator.js';
 import { removeEncrypted, saveEncrypted, sha256 } from '../infrastructure/encryptedFileStorage.js';
+import { scanBuffer } from '../../security/malwareScanner.js';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const signatures = {
@@ -30,6 +31,7 @@ export async function createAdmission(input) {
 export async function uploadDocument({ collaboratorId, type, fileName, mimeType, buffer }) {
   if (!DOCUMENT_TYPES.includes(type)) throw new AppError('Tipo de documento invalido.');
   validateFile(buffer, mimeType);
+  await scanBuffer(buffer,{filename:fileName,mime:mimeType});
   let storageKey;
   try {
     return await withTransaction(async (client) => {

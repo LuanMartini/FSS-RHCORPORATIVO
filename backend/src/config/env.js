@@ -1,5 +1,14 @@
 const DEFAULT_JWT_SECRET = 'dev-secret-change-me';
 
+function ttlSeconds(value) {
+  const parsed = String(value).trim().match(/^(\d+)(s|m|h|d)?$/i);
+  if (!parsed) throw new Error('JWT_ACCESS_TTL deve usar segundos ou sufixo s, m, h ou d.');
+  const amount = Number(parsed[1]);
+  const multiplier = { s: 1, m: 60, h: 3600, d: 86400 }[String(parsed[2] || 's').toLowerCase()];
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('JWT_ACCESS_TTL invalido.');
+  return amount * multiplier;
+}
+
 export function getEnv() {
   const port = Number(process.env.PORT || 3333);
   const jwtSecret = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
@@ -8,6 +17,7 @@ export function getEnv() {
     .map((origin) => origin.trim())
     .filter(Boolean);
   const isProduction = process.env.NODE_ENV === 'production';
+  const jwtAccessTtl = process.env.JWT_ACCESS_TTL || '10m';
 
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error('PORT deve ser um numero inteiro positivo.');
@@ -18,13 +28,13 @@ export function getEnv() {
   }
 
   return {
-    allowAdminRegistration: process.env.ALLOW_ADMIN_REGISTRATION === 'true',
     corsOrigins,
     isProduction,
     jwtSecret,
     jwtIssuer: process.env.JWT_ISSUER || 'rhcorp-api',
     jwtAudience: process.env.JWT_AUDIENCE || 'rhcorp-web',
-    jwtAccessTtl: process.env.JWT_ACCESS_TTL || '10m',
+    jwtAccessTtl,
+    jwtAccessTtlSeconds: ttlSeconds(jwtAccessTtl),
     port,
     rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 300),
     rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),

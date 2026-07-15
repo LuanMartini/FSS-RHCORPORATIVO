@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import { getEnv } from './config/env.js';
 import { getPool } from './db/client.js';
@@ -18,6 +19,7 @@ import flexBenefitsRoutes from './flexBenefits/interfaces/flexBenefitsRoutes.ts'
 import lmsRoutes from './lms/interfaces/lmsRoutes.ts';
 import climateRoutes from './climate/interfaces/climateRoutes.ts';
 import auditRoutes from './audit/interfaces/auditRoutes.ts';
+import privacyRoutes from './privacy/privacyRoutes.js';
 import { auditCaptureMiddleware } from './audit/interfaces/auditCaptureMiddleware.ts';
 
 const env = getEnv();
@@ -30,6 +32,7 @@ export function createApp() {
   app.use(securityMiddleware());
   app.use(cors(corsOptions()));
   app.use(express.json({ limit: '1mb' }));
+  app.use((req,res,next)=>{req.correlationId=String(req.get('x-correlation-id')||randomUUID());res.setHeader('x-correlation-id',req.correlationId);next();});
   app.use(auditCaptureMiddleware);
 
   app.get('/health', (req, res) => {
@@ -43,7 +46,7 @@ export function createApp() {
       if (!sockets.ready) return res.status(503).json({ ok: false, service: 'rhcorp-api', redis: sockets.error ?? 'not-ready' });
       res.json({ ok: true, service: 'rhcorp-api' });
     } catch (error) {
-      res.status(503).json({ ok: false, service: 'rhcorp-api', error: error instanceof Error ? error.message : 'not-ready' });
+      res.status(503).json({ ok: false, service: 'rhcorp-api', error: 'not-ready' });
     }
   });
 
@@ -60,6 +63,7 @@ export function createApp() {
   app.use('/lms', lmsRoutes);
   app.use('/clima', climateRoutes);
   app.use('/auditoria', auditRoutes);
+  app.use('/privacidade', privacyRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ erro: 'Rota nao encontrada' });
@@ -73,7 +77,10 @@ export function createApp() {
     const status = err.status || 500;
     const message = status >= 500 ? 'Erro interno do servidor' : err.message;
     if (status >= 500) console.error(err);
-    res.status(status).json({ erro: message, codigo: err.code, detalhes: err.details });
+    const body = { erro: message };
+    if (status < 500 && err.code) body.codigo = err.code;
+    if (status < 500 && err.details) body.detalhes = err.details;
+    res.status(status).json(body);
   });
 
   return app;

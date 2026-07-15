@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import * as service from '../application/journeyService.ts';
+import { loadPrincipal } from '../../middleware/authorization.js';
 
 interface AuthenticatedRequest extends Request {
   user?: { sub?: string | number };
@@ -10,8 +11,14 @@ function clientIp(request: Request): string | null {
   return request.ip || null;
 }
 
-export async function listCollaborators(_request: Request, response: Response, next: NextFunction): Promise<void> {
-  try { response.json(await service.listCollaborators()); } catch (error) { next(error); }
+export async function listCollaborators(request: AuthenticatedRequest, response: Response, next: NextFunction): Promise<void> {
+  try {
+    const principal = await loadPrincipal(request);
+    response.json(await service.listCollaborators({
+      managerId: principal.collaboratorId,
+      all: principal.permissions.has('time.manage.all'),
+    }));
+  } catch (error) { next(error); }
 }
 
 export async function getConfiguration(request: Request, response: Response, next: NextFunction): Promise<void> {

@@ -19,7 +19,8 @@ const COLORS = ['#0d9488','#2563eb','#7c3aed','#db2777','#ea580c','#0891b2'];
 
 function errorResponse(error: unknown): Record<string, unknown> {
   const row = error as { message?: string; code?: string; status?: number };
-  return { ok:false,error:row.message ?? 'Erro de comunicacao.',code:row.code,status:row.status ?? 500 };
+  const status=row.status ?? 500;
+  return { ok:false,error:status>=500?'Erro de comunicacao.':row.message ?? 'Operacao nao permitida.',...(status<500&&row.code?{code:row.code}:{}),status };
 }
 
 function recruiter(socket: Socket): SocketUser {
@@ -79,6 +80,7 @@ export function attachAtsSocketServer(server: HttpServer): Server {
           WHERE u.id=? AND u.ativo`,[userId]) as Array<Record<string,unknown>>;
         if (!rows[0]||Number(rows[0].session_version)!==Number(payload.sv??1)) throw new Error('Usuario nao encontrado ou sessao revogada.');
         socket.data.user = { id:userId,name:String(rows[0].nome),email:String(rows[0].email),color:COLORS[userId%COLORS.length] ?? '#0d9488' } satisfies SocketUser;
+        socket.data.sessionVersion = Number(rows[0].session_version);
       } else if (portalToken) {
         const access = await service.portal(portalToken);
         const row = access.access as Record<string,unknown>;
@@ -90,6 +92,18 @@ export function attachAtsSocketServer(server: HttpServer): Server {
 
   io.on('connection',(socket) => {
     const candidate = socket.data.candidate as CandidateAccess | undefined;
+    socket.use(async (_packet,next) => {
+      if (candidate) return next();
+      try {
+        const user=socket.data.user as SocketUser|undefined;
+        if(!user)throw new Error('Sessao ausente.');
+        const rows=await all(`SELECT u.session_version FROM usuarios u
+          JOIN perfis_permissoes pp ON pp.perfil=u.perfil AND pp.permissao='ats.use'
+          WHERE u.id=? AND u.ativo`,[user.id]) as Array<Record<string,unknown>>;
+        if(!rows[0]||Number(rows[0].session_version)!==Number(socket.data.sessionVersion))throw new Error('Sessao revogada.');
+        next();
+      }catch{next(new Error('Nao autorizado.'));}
+    });
     if (candidate) {
       socket.join(`chat:${candidate.applicationId}`);
       socket.on('chat:send',async (payload:Record<string,unknown>,ack?:Ack) => {

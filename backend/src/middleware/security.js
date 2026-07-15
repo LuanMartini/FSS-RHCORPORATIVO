@@ -16,6 +16,31 @@ export function securityMiddleware() {
   ];
 }
 
+export const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { erro: 'Muitas tentativas. Aguarde antes de tentar novamente.' },
+});
+
+export const registrationRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { erro: 'Limite de tentativas de cadastro excedido.' },
+});
+
+export const publicSignatureRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { erro: 'Muitas tentativas de assinatura.' },
+});
+
 export function corsOptions() {
   const env = getEnv();
   return {

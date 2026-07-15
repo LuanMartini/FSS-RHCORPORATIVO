@@ -1,4 +1,4 @@
-import { all, run, isMysql } from '../db/client.js';
+import { all, run, isMysql, withSerializableRetry } from '../db/client.js';
 
 export async function findUserByEmail(email) {
   const rows = await all(
@@ -37,4 +37,23 @@ export async function createUser({ nome, email, senhaHash }) {
 export async function countUsers() {
   const rows = await all('SELECT COUNT(*) AS c FROM usuarios');
   return Number(rows[0]?.c ?? rows[0]?.['COUNT(*)'] ?? 0);
+}
+
+export async function bootstrapAdministrator({ nome, email, senhaHash }) {
+  return withSerializableRetry(async (tx) => {
+    if (!isMysql) await tx.all('SELECT pg_advisory_xact_lock(?)', [927410]);
+    const count = await tx.all('SELECT COUNT(*) AS c FROM usuarios');
+    if (Number(count[0]?.c ?? count[0]?.['COUNT(*)'] ?? 0) !== 0) {
+      throw Object.assign(new Error('Bootstrap administrativo ja concluido.'), {
+        status: 409,
+        code: 'BOOTSTRAP_ALREADY_COMPLETED',
+      });
+    }
+    const rows = await tx.all(
+      `INSERT INTO usuarios (nome,email,senha_hash,perfil)
+       VALUES (?,?,?,'ADMINISTRADOR') RETURNING id`,
+      [nome, email, senhaHash],
+    );
+    return rows[0]?.id;
+  });
 }

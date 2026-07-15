@@ -124,6 +124,54 @@ export function authorizeSelfOr(permission, location = 'params', field = 'colabo
   };
 }
 
+async function isManagedCollaborator(managerId, requestedId) {
+  const rows = await all(
+    `WITH RECURSIVE equipe AS (
+       SELECT id FROM colaboradores WHERE gestor_id=?
+       UNION ALL
+       SELECT c.id FROM colaboradores c JOIN equipe e ON c.gestor_id=e.id
+     ) SELECT 1 FROM equipe WHERE id=? LIMIT 1`,
+    [managerId, requestedId],
+  );
+  return Boolean(rows[0]);
+}
+
+export function authorizeSelfTeamOr(permissionAll, location = 'params', field = 'colaboradorId') {
+  return async (req, res, next) => {
+    try {
+      const principal = await loadPrincipal(req);
+      const requestedId = Number(req[location]?.[field]);
+      if (!Number.isInteger(requestedId) || requestedId <= 0) throw denied('Colaborador invalido.');
+      if (principal.permissions.has(permissionAll) || requestedId === principal.collaboratorId) return next();
+      if (principal.permissions.has('time.manage.team') && principal.collaboratorId != null
+          && await isManagedCollaborator(principal.collaboratorId, requestedId)) return next();
+      throw denied();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function scopeOwnTeamCollaborator(permissionAll, location = 'query', field = 'colaboradorId') {
+  return async (req, res, next) => {
+    try {
+      const principal = await loadPrincipal(req);
+      if (principal.permissions.has(permissionAll)) return next();
+      if (principal.collaboratorId == null) throw denied();
+      const raw = req[location]?.[field];
+      const requestedId = raw == null || raw === '' ? principal.collaboratorId : Number(raw);
+      const own = requestedId === principal.collaboratorId;
+      const managed = principal.permissions.has('time.manage.team')
+        && await isManagedCollaborator(principal.collaboratorId, requestedId);
+      if (!own && !managed) throw denied();
+      req[location] = { ...(req[location] ?? {}), [field]: String(requestedId) };
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
 export function authorizeOwnPayslipOr(permission) {
   return async (req, res, next) => {
     try {
@@ -154,6 +202,24 @@ export function authorizeOwnPointOr(permission) {
       );
       if (!rows[0]) throw denied();
       next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function authorizeOwnTeamPointOr(permissionAll) {
+  return async (req, res, next) => {
+    try {
+      const principal = await loadPrincipal(req);
+      if (principal.permissions.has(permissionAll)) return next();
+      if (principal.collaboratorId == null) throw denied();
+      const rows = await all('SELECT colaborador_id FROM pontos_registrados WHERE nsr=? LIMIT 1', [req.params.nsr]);
+      const ownerId = Number(rows[0]?.colaborador_id);
+      if (ownerId === principal.collaboratorId) return next();
+      if (principal.permissions.has('time.manage.team')
+          && await isManagedCollaborator(principal.collaboratorId, ownerId)) return next();
+      throw denied();
     } catch (error) {
       next(error);
     }

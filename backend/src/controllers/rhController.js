@@ -1,4 +1,8 @@
 import * as rh from '../models/rh.js';
+import { loadPrincipal } from '../middleware/authorization.js';
+import * as admissionService from '../core/application/admissionService.js';
+import * as lifecycleService from '../core/application/lifecycleService.js';
+import { parseNewAdmission } from '../core/domain/contracts.js';
 import { montarHolerite, holeritePublico, fmt, calcularFGTS } from '../services/payrollService.js';
 import {
   optionalDate,
@@ -22,7 +26,7 @@ function horaBr(dt) {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export async function dashboard(req, res) {
+export async function dashboard(req, res, next) {
   try {
     const st = await rh.countsFuncionarios();
     const total = st.ATIVO + st.DESLIGADO + st.FERIAS;
@@ -74,45 +78,57 @@ export async function dashboard(req, res) {
       pontoDoDia: { registrosHoje },
     });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function funcionarios(req, res) {
+export async function funcionarios(req, res, next) {
   try {
-    const rows = await rh.listFuncionarios();
+    const principal = await loadPrincipal(req);
+    const requestedLimit = Number(req.query?.limite ?? 100);
+    const requestedCursor = Number(req.query?.cursor ?? 0);
+    const rows = await rh.listFuncionariosScoped({
+      collaboratorId: principal.collaboratorId,
+      canReadAll: principal.permissions.has('employee.read.all') || principal.role === 'ADMINISTRADOR',
+      canReadSensitive: principal.permissions.has('employee.read.sensitive'),
+      canReadSalary: principal.permissions.has('employee.read.salary'),
+      limit: Number.isInteger(requestedLimit) ? Math.min(100, Math.max(1, requestedLimit)) : 100,
+      cursor: Number.isInteger(requestedCursor) && requestedCursor > 0 ? requestedCursor : 0,
+    });
     res.json(rows);
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function funcionarioDesligar(req, res) {
+export async function funcionarioDesligar(req, res, next) {
   try {
-    await rh.desligarFuncionario(req.params.id);
+    const principal=await loadPrincipal(req);
+    await lifecycleService.terminateCollaborator({
+      collaboratorId:Number(req.params.id),expectedVersion:req.body?.versao,
+      actorUserId:principal.userId,actorReference:`usuario:${principal.userId}`,
+    });
     res.status(204).end();
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
+  } catch (e) { next(e); }
 }
 
-export async function cargos(req, res) {
+export async function cargos(req, res, next) {
   try {
     res.json(await rh.listCargos());
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function departamentos(req, res) {
+export async function departamentos(req, res, next) {
   try {
     res.json(await rh.listDepartamentos());
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function admitir(req, res) {
+export async function admitir(req, res, next) {
   try {
     const b = req.body ?? {};
     const cargoId = Number(b.cargoId);
@@ -136,26 +152,23 @@ export async function admitir(req, res) {
     const cargos = await rh.listCargos();
     const cg = cargos.find((c) => c.id === cargoId);
     if (!cg) return res.status(400).json({ erro: 'Cargo inválido' });
-    await rh.admitir({
-      nome: String(b.nome).trim(),
-      cpf,
-      email: String(b.email).trim(),
-      cargoId,
-      departamentoId: deptId ?? cg.departamentoId,
-      salario: Number(b.salario),
-      telefone: b.telefone,
-      dataNascimento: b.dataNascimento,
+    const principal=await loadPrincipal(req);
+    const input=parseNewAdmission({
+      nomeCompleto:String(b.nome).trim(),cpf,email:String(b.email).trim(),cargoId,
+      departamentoId:deptId??cg.departamentoId,salario:Number(b.salario),telefone:b.telefone,
+      dataNascimento:b.dataNascimento,dataAdmissao:b.dataAdmissao,
     });
-    res.status(201).json({ ok: true });
+    const created=await admissionService.createAdmission({...input,userId:principal.userId,actorReference:`usuario:${principal.userId}`});
+    res.status(201).json({ ok: true,colaboradorId:Number(created.id) });
   } catch (e) {
     if (e.code === '23505' || e.errno === 1062) {
       return res.status(409).json({ erro: 'CPF ou e-mail já cadastrado' });
     }
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function pontoPost(req, res) {
+export async function pontoPost(req, res, next) {
   try {
     const { funcionarioId, tipo } = req.body ?? {};
     if (
@@ -175,28 +188,27 @@ export async function pontoPost(req, res) {
       registrado_em: row.registrado_em,
     });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function pontoEspelho(req, res) {
+export async function pontoEspelho(req, res, next) {
   try {
     const rows = await rh.espelhoPonto(req.params.funcionarioId);
     res.json(rows);
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function feriasList(req, res) {
+export async function feriasList(req, res, next) {
   try {
-    res.json(await rh.listFerias());
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
+    const principal=await loadPrincipal(req);
+    res.json(await rh.listFerias({managerId:principal.collaboratorId,all:principal.permissions.has('time.manage.all')}));
+  } catch (e) { next(e); }
 }
 
-export async function feriasPost(req, res) {
+export async function feriasPost(req, res, next) {
   try {
     const b = req.body ?? {};
     if (
@@ -212,53 +224,55 @@ export async function feriasPost(req, res) {
       )
     ) return;
 
-    await rh.createFeria(req.body ?? {});
+    if(String(b.dataInicio)>String(b.dataFim))return res.status(422).json({erro:'Data final deve ser igual ou posterior a data inicial.'});
+    const principal=await loadPrincipal(req);
+    if(!principal.permissions.has('time.manage.all')){
+      const allowed=await rh.isManagedCollaborator(principal.collaboratorId,Number(b.funcionarioId));
+      if(!allowed)return res.status(403).json({erro:'Colaborador fora da equipe autorizada.',codigo:'LEAVE_MANAGER_FORBIDDEN'});
+    }
+    await rh.createFeria(req.body ?? {},{userId:principal.userId,reference:`usuario:${principal.userId}`});
     res.status(201).json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
+  } catch (e) { next(e); }
 }
 
-export async function feriasAprovar(req, res) {
+export async function feriasAprovar(req, res, next) {
   try {
-    const ok = await rh.feriasAprovar(req.params.id);
+    const principal=await loadPrincipal(req);
+    const ok = await rh.feriasAprovar(req.params.id,{versao:req.body?.versao,userId:principal.userId,managerId:principal.collaboratorId,all:principal.permissions.has('time.manage.all')});
     if (!ok) return res.status(404).json({ erro: 'Registro não encontrado' });
     res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
+  } catch (e) { next(e); }
 }
 
-export async function feriasReprovar(req, res) {
+export async function feriasReprovar(req, res, next) {
   try {
     const motivo = req.body?.motivo ?? '';
-    const ok = await rh.feriasReprovar(req.params.id, motivo);
+    const principal=await loadPrincipal(req);
+    const ok = await rh.feriasReprovar(req.params.id, motivo,{versao:req.body?.versao,userId:principal.userId,managerId:principal.collaboratorId,all:principal.permissions.has('time.manage.all')});
     if (!ok) return res.status(404).json({ erro: 'Registro não encontrado' });
     res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
+  } catch (e) { next(e); }
 }
 
-export async function feriasEncerrar(req, res) {
+export async function feriasEncerrar(req, res, next) {
   try {
     const ok = await rh.feriasEncerrar(req.params.id);
     if (!ok) return res.status(404).json({ erro: 'Registro não encontrado' });
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function advertenciasList(req, res) {
+export async function advertenciasList(req, res, next) {
   try {
     res.json(await rh.listAdvertencias());
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function advertenciasPost(req, res) {
+export async function advertenciasPost(req, res, next) {
   try {
     const b = req.body ?? {};
     if (
@@ -276,19 +290,19 @@ export async function advertenciasPost(req, res) {
     await rh.createAdvertencia(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function beneficiosList(req, res) {
+export async function beneficiosList(req, res, next) {
   try {
     res.json(await rh.listBeneficios());
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function beneficiosPost(req, res) {
+export async function beneficiosPost(req, res, next) {
   try {
     const b = req.body ?? {};
     if (
@@ -305,11 +319,11 @@ export async function beneficiosPost(req, res) {
     await rh.createBeneficio(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function beneficiosVincular(req, res) {
+export async function beneficiosVincular(req, res, next) {
   try {
     const { funcionarioId, beneficioId } = req.body ?? {};
     if (
@@ -325,19 +339,19 @@ export async function beneficiosVincular(req, res) {
     await rh.vincularBeneficio(Number(funcionarioId), Number(beneficioId));
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function treinamentosList(req, res) {
+export async function treinamentosList(req, res, next) {
   try {
     res.json(await rh.listTreinamentos());
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function treinamentosPost(req, res) {
+export async function treinamentosPost(req, res, next) {
   try {
     const b = req.body ?? {};
     if (
@@ -354,11 +368,11 @@ export async function treinamentosPost(req, res) {
     await rh.createTreinamento(req.body ?? {});
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function treinamentosInscrever(req, res) {
+export async function treinamentosInscrever(req, res, next) {
   try {
     const { funcionarioId, treinamentoId } = req.body ?? {};
     if (
@@ -374,22 +388,22 @@ export async function treinamentosInscrever(req, res) {
     await rh.inscreverTreinamento(Number(funcionarioId), Number(treinamentoId));
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function folhaUm(req, res) {
+export async function folhaUm(req, res, next) {
   try {
     const f = await rh.getFuncionarioAtivo(req.params.id);
     if (!f) return res.status(404).json({ erro: 'Funcionário não encontrado' });
     const h = montarHolerite(f);
     res.json(holeritePublico(h));
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function folhaCompleta(req, res) {
+export async function folhaCompleta(req, res, next) {
   try {
     const ref = new Date();
     const folks = await rh.listFuncionariosComSalario();
@@ -421,19 +435,19 @@ export async function folhaCompleta(req, res) {
       holerites,
     });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function vagasList(req, res) {
+export async function vagasList(req, res, next) {
   try {
     res.json(await rh.listVagas());
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function vagasPost(req, res) {
+export async function vagasPost(req, res, next) {
   try {
     if (
       validationResponse(
@@ -449,20 +463,20 @@ export async function vagasPost(req, res) {
     await rh.createVaga(req.body);
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function candidatosList(req, res) {
+export async function candidatosList(req, res, next) {
   try {
     const vagaId = req.params.vagaId;
     res.json(await rh.listCandidatos(vagaId));
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function candidatosPost(req, res) {
+export async function candidatosPost(req, res, next) {
   try {
     if (
       validationResponse(
@@ -478,11 +492,11 @@ export async function candidatosPost(req, res) {
     await rh.createCandidato(req.body);
     res.status(201).json({ ok: true });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }
 
-export async function candidatosPatchFase(req, res) {
+export async function candidatosPatchFase(req, res, next) {
   try {
     const { fase } = req.body;
     if (!fase) return res.status(400).json({ erro: 'Fase não informada' });
@@ -490,6 +504,6 @@ export async function candidatosPatchFase(req, res) {
     await rh.updateFaseCandidato(req.params.id, fase);
     res.json({ ok: true, faseAtualizada: fase });
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    next(e);
   }
 }

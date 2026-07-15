@@ -333,6 +333,24 @@ export async function seedIfEmpty() {
        ON CONFLICT (cpf) DO NOTHING`
     );
     await run(
+      `INSERT INTO funcionarios_colaboradores (funcionario_id,colaborador_id)
+       SELECT f.id,c.id FROM funcionarios f JOIN colaboradores c ON c.cpf=f.cpf
+       ON CONFLICT DO NOTHING`
+    );
+    await run(
+      `INSERT INTO carteira_colaborador (colaborador_id,competencia,saldo_total_centavos,saldo_alocado_centavos)
+       SELECT c.id,date_trunc('month',current_date)::date,120000,0 FROM colaboradores c WHERE c.status<>'DESLIGADO'
+       ON CONFLICT (colaborador_id,competencia) DO NOTHING`
+    );
+    await run(
+      `INSERT INTO periodos_aquisitivos_ferias
+       (colaborador_id,inicio_em,fim_em,disponivel_em,dias_direito)
+       SELECT c.id,COALESCE(c.data_admissao,c.created_at::date),
+         COALESCE(c.data_admissao,c.created_at::date)+interval '1 year'-interval '1 day',
+         COALESCE(c.data_admissao,c.created_at::date)+interval '1 year',30
+       FROM colaboradores c ON CONFLICT (colaborador_id,inicio_em) DO NOTHING`
+    );
+    await run(
       `INSERT INTO matriculas_cursos (colaborador_id, curso_id)
        SELECT c.id, curso.id FROM colaboradores c CROSS JOIN cursos curso
        WHERE c.status = 'ATIVO' AND curso.ativo

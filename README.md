@@ -52,8 +52,8 @@ O backend não executa migrações nem seed durante o startup. O comando explíc
 `npm --prefix backend run db:seed` cria dados iniciais quando as tabelas estão
 vazias; em produção, configure uma senha forte antes de executá-lo.
 
-- E-mail: `admin@empresa.com`
-- Senha: `admin123`
+- E-mail: definido por `SEED_ADMIN_EMAIL`.
+- Senha: obrigatoriamente definida por `SEED_ADMIN_PASSWORD` em producao.
 
 Também são criados departamentos, cargos, funcionários, benefícios, treinamentos e vagas de exemplo para o dashboard abrir preenchido.
 
@@ -72,14 +72,29 @@ npm --prefix backend run worker:audit
 
 ## Segurança
 
-Por padrão, novos cadastros de administrador ficam desabilitados quando já existe usuário no banco. Para abrir cadastro temporariamente em desenvolvimento:
+O bootstrap web existe somente em desenvolvimento, cria apenas o primeiro usuario
+e usa bloqueio transacional. Para exibir a tela de bootstrap no frontend:
 
 ```env
-ALLOW_ADMIN_REGISTRATION=true
 VITE_ADMIN_REGISTRATION_ENABLED=true
 ```
 
-Em produção, mantenha ambos como `false`, troque `JWT_SECRET`, use uma senha forte para o admin inicial e configure `CORS_ORIGIN` com o domínio real do frontend.
+Em produção, mantenha `VITE_ADMIN_REGISTRATION_ENABLED=false`, troque
+`JWT_SECRET`, use uma senha forte no job de seed e configure `CORS_ORIGIN` com o
+domínio real do frontend.
+
+## Autorizacao, privacidade e fonte canonica
+
+`colaboradores` e a fonte canonica de pessoas. Rotas legadas permanecem apenas
+como camada de compatibilidade e novas escritas de admissao/desligamento usam o
+Core transacional. Gestores recebem escopo de equipe; CPF, salario, jornada e
+desempenho exigem permissoes granulares. Em producao, o bootstrap web retorna
+404 e o administrador inicial deve ser criado pelo job explicito de seed/deploy.
+
+O modulo `/privacidade` oferece exportacao do proprio cadastro, solicitacoes de
+correcao/exportacao/anonimizacao/eliminacao e consentimento biometrico versionado.
+Eliminacao nunca e automatica: bloqueios legais e politicas de retencao precisam
+ser avaliados pelo RH/DPO. Consulte `ARCHITECTURE.md`.
 
 ## Core de admissão digital e organograma
 

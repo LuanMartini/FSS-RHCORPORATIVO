@@ -15,9 +15,17 @@ export async function getCycle(cycleId:number):Promise<Row|null> {
   return rows[0]??null;
 }
 
-export async function dashboard(cycleId:number,departmentId:number|null):Promise<Record<string,unknown>> {
+export async function dashboard(cycleId:number,departmentId:number|null,scope:{managerId:number|null;all:boolean}):Promise<Record<string,unknown>> {
+  if(!scope.all&&scope.managerId==null)return{cycles:await listCycles(),departments:[],talents:[],okrs:[],calibrations:[]};
   const params=departmentId===null?[cycleId]:[cycleId,departmentId];
   const departmentFilter=departmentId===null?'':' AND col.departamento_id=?';
+  const talentScope=scope.all?'':' AND (col.id=? OR col.gestor_id=?)';
+  const talentParams=scope.all?params:[...params,scope.managerId,scope.managerId];
+  const okrScope=scope.all?'':` AND (o.nivel IN ('CORPORATIVO','DEPARTAMENTO') OR o.colaborador_id=?
+    OR EXISTS (SELECT 1 FROM colaboradores mc WHERE mc.id=o.colaborador_id AND mc.gestor_id=?))`;
+  const okrParams=scope.all?params:[...params,scope.managerId,scope.managerId];
+  const calibrationScope=scope.all?'':' AND (c.id=? OR c.gestor_id=?)';
+  const calibrationParams=scope.all?params:[...params,scope.managerId,scope.managerId];
   const [cycles,departments,talents,okrs,calibrations]=await Promise.all([
     listCycles(),
     all(`SELECT id,nome,sigla FROM departamentos ORDER BY nome`) as Promise<Row[]>,
@@ -33,21 +41,21 @@ export async function dashboard(cycleId:number,departmentId:number|null):Promise
       LEFT JOIN departamentos d ON d.id=col.departamento_id LEFT JOIN cargos ca ON ca.id=col.cargo_id
       LEFT JOIN LATERAL (SELECT justificativa,calibrado_em FROM logs_calibracao_ninebox l
         WHERE l.resultado_id=r.id ORDER BY calibrado_em DESC LIMIT 1) last_log ON true
-      WHERE r.ciclo_id=?${departmentFilter} ORDER BY r.quadrante_y DESC,r.quadrante_x,col.nome_completo`,params) as Promise<Row[]>,
+      WHERE r.ciclo_id=?${departmentFilter}${talentScope} ORDER BY r.quadrante_y DESC,r.quadrante_x,col.nome_completo`,talentParams) as Promise<Row[]>,
     all(`SELECT o.id,o.objetivo_pai_id,o.nivel,o.titulo,o.descricao,o.departamento_id,o.colaborador_id,
         o.unidade,o.valor_atual,o.valor_meta,o.peso,o.progresso,o.status,o.versao,d.nome AS departamento,
         COALESCE(c.nome_social,c.nome_completo) AS colaborador
       FROM objetivos_okr o LEFT JOIN departamentos d ON d.id=o.departamento_id
       LEFT JOIN colaboradores c ON c.id=o.colaborador_id
-      WHERE o.ciclo_id=?${departmentId===null?'':' AND (o.nivel=\'CORPORATIVO\' OR o.departamento_id=?)'}
-      ORDER BY CASE o.nivel WHEN 'CORPORATIVO' THEN 1 WHEN 'DEPARTAMENTO' THEN 2 ELSE 3 END,o.id`,params) as Promise<Row[]>,
+      WHERE o.ciclo_id=?${departmentId===null?'':' AND (o.nivel=\'CORPORATIVO\' OR o.departamento_id=?)'}${okrScope}
+      ORDER BY CASE o.nivel WHEN 'CORPORATIVO' THEN 1 WHEN 'DEPARTAMENTO' THEN 2 ELSE 3 END,o.id`,okrParams) as Promise<Row[]>,
     all(`SELECT l.id,l.colaborador_id,COALESCE(c.nome_social,c.nome_completo) AS colaborador,
         l.quadrante_x_anterior,l.quadrante_y_anterior,l.quadrante_x_novo,l.quadrante_y_novo,
         l.justificativa,l.calibrado_em,u.nome AS calibrado_por
       FROM logs_calibracao_ninebox l JOIN colaboradores c ON c.id=l.colaborador_id
       LEFT JOIN usuarios u ON u.id=l.calibrado_por
-      WHERE l.ciclo_id=?${departmentId===null?'':' AND c.departamento_id=?'}
-      ORDER BY l.calibrado_em DESC LIMIT 30`,params) as Promise<Row[]>,
+      WHERE l.ciclo_id=?${departmentId===null?'':' AND c.departamento_id=?'}${calibrationScope}
+      ORDER BY l.calibrado_em DESC LIMIT 30`,calibrationParams) as Promise<Row[]>,
   ]);
   return {cycles,departments,talents,okrs,calibrations};
 }

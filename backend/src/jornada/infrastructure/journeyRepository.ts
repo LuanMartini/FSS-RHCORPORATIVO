@@ -51,15 +51,19 @@ export function mapSchedule(row: ScheduleRow): WorkSchedule {
   };
 }
 
-export async function listCollaborators(): Promise<Record<string, unknown>[]> {
+export async function listCollaborators(scope:{managerId:number|null;all:boolean}): Promise<Record<string, unknown>[]> {
+  if(!scope.all&&scope.managerId==null)return [];
+  const filter=scope.all?'':`AND (c.id=? OR c.gestor_id=?)`;
+  const params=scope.all?[]:[scope.managerId,scope.managerId];
   return query(
-    `SELECT c.id, c.nome_completo, c.cpf, c.status, c.filial_id,
+    `SELECT c.id, c.nome_completo, CASE WHEN ? THEN c.cpf ELSE NULL END AS cpf, c.status, c.filial_id,
             f.nome AS filial_nome, f.codigo AS filial_codigo,
             (bf.colaborador_id IS NOT NULL AND bf.ativo = TRUE) AS biometria_cadastrada
        FROM colaboradores c
        LEFT JOIN filiais f ON f.id = c.filial_id
        LEFT JOIN biometrias_faciais bf ON bf.colaborador_id = c.id
-      WHERE c.status <> 'DESLIGADO' ORDER BY c.nome_completo`
+      WHERE c.status <> 'DESLIGADO' ${filter} ORDER BY c.nome_completo`,
+    [scope.all,...params]
   );
 }
 
@@ -171,6 +175,12 @@ export async function enrollBiometric(input: {
        consentimento_em = NOW(), consentimento_ip = EXCLUDED.consentimento_ip,
        versao = biometrias_faciais.versao + 1, ativo = TRUE, updated_at = NOW()`,
     [input.collaboratorId, input.templateHash, input.storageKey, input.consentIp]
+  );
+  await client.run(
+    `INSERT INTO consentimentos_dados
+      (colaborador_id,finalidade_codigo,politica_versao,concedido,ip,metadados)
+     VALUES (?,'BIOMETRIA_PONTO','BIOMETRIA_V1',true,?::inet,'{"origem":"cadastro_ponto"}'::jsonb)`,
+    [input.collaboratorId,input.consentIp],
   );
   return previous[0]?.foto_storage_key ?? null;
 }

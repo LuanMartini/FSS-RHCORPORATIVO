@@ -14,12 +14,12 @@ function optionalPositiveInteger(value:unknown):number|null {
   return positiveInteger(value,'Departamento');
 }
 
-export async function dashboard(cycleInput:unknown,departmentInput:unknown) {
+export async function dashboard(cycleInput:unknown,departmentInput:unknown,scope:{managerId:number|null;all:boolean}) {
   const cycles=await repository.listCycles();
   const cycleId=cycleInput===undefined||cycleInput===null||cycleInput===''
     ? Number(cycles[0]?.id):positiveInteger(cycleInput,'Ciclo');
   if(!cycleId) return {cycles,departments:[],talents:[],okrs:[],calibrations:[],selectedCycleId:null};
-  const result=await repository.dashboard(cycleId,optionalPositiveInteger(departmentInput));
+  const result=await repository.dashboard(cycleId,optionalPositiveInteger(departmentInput),scope);
   return {...result,selectedCycleId:cycleId};
 }
 

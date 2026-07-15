@@ -10,7 +10,6 @@ JWT_SECRET=gere-um-segredo-longo
 JWT_ISSUER=rhcorp-api
 JWT_AUDIENCE=rhcorp-web
 JWT_ACCESS_TTL=10m
-ALLOW_ADMIN_REGISTRATION=false
 CORS_ORIGIN=https://seu-frontend.com
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX=300
@@ -27,6 +26,9 @@ PG_STATEMENT_TIMEOUT_MS=30000
 TRUST_PROXY_HOPS=1
 SEED_ADMIN_EMAIL=admin@empresa.com
 SEED_ADMIN_PASSWORD=troque-essa-senha
+MALWARE_SCANNER_URL=https://scanner-interno.example/scan
+MALWARE_SCANNER_TOKEN=segredo-fornecido-pelo-scanner
+LEAVE_WORKER_INTERVAL_MS=300000
 ```
 
 ## Variaveis do frontend
@@ -64,6 +66,7 @@ Workers independentes:
 ```bash
 npm --prefix backend run worker
 npm --prefix backend run worker:audit
+npm --prefix backend run worker:leave
 ```
 
 Frontend:
@@ -79,7 +82,7 @@ Pasta publicada do frontend: `frontend/dist`.
 
 - Trocar `JWT_SECRET`.
 - Trocar `SEED_ADMIN_PASSWORD`.
-- Manter `ALLOW_ADMIN_REGISTRATION=false`.
+- Manter `VITE_ADMIN_REGISTRATION_ENABLED=false`; o bootstrap da API retorna 404 em producao.
 - Apontar `CORS_ORIGIN` para o dominio real do frontend.
 - Ajustar `RATE_LIMIT_MAX` conforme o volume real de usuarios.
 - Apontar `VITE_API_URL` para a URL publica da API.
@@ -87,6 +90,7 @@ Pasta publicada do frontend: `frontend/dist`.
 - Restaurar o backup em um banco separado e executar `db:migrate` nele.
 - Confirmar que `schema_migrations` nao possui checksum divergente.
 - Executar o worker de folha e o worker de auditoria separados da API.
+- Executar o worker de ferias e configurar scanner antimalware real; uploads falham sem scanner em producao.
 - Validar TLS `verify-full` no PostgreSQL e Redis privado/autenticado.
 - Garantir que nenhum segredo foi publicado como variavel `VITE_*`.
 

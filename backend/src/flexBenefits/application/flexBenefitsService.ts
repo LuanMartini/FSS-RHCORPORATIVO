@@ -3,6 +3,7 @@ import {removeEncrypted,saveEncrypted,sha256} from '../../core/infrastructure/en
 import {BENEFIT_CATEGORIES,type AllocationInput,type BenefitCategory} from '../domain/types.js';
 import {resolveApprovalLevels,simulateReceiptOcr,stablePayloadHash,validateReceiptFile} from '../domain/flexBenefitsEngine.js';
 import * as repository from '../infrastructure/flexBenefitsRepository.js';
+import {scanBuffer} from '../../security/malwareScanner.js';
 
 const appError=(message:string,status:number,code='VALIDATION_ERROR'):Error=>Object.assign(new Error(message),{status,code});
 const positiveInteger=(value:unknown,field:string):number=>{const parsed=Number(value);if(!Number.isInteger(parsed)||parsed<=0)throw appError(`${field} invalido.`,400);return parsed;};
@@ -11,16 +12,16 @@ function competence(value:unknown):string{if(value===undefined||value===null||va
 
 export async function dashboard(collaboratorInput:unknown,competenceInput:unknown){const collaboratorId=collaboratorInput===undefined||collaboratorInput===null||collaboratorInput===''?null:positiveInteger(collaboratorInput,'Colaborador');return repository.dashboard(collaboratorId,competence(competenceInput));}
 
-export async function distribute(walletInput:unknown,body:Record<string,unknown>){
-  const walletId=positiveInteger(walletInput,'Carteira');const expectedVersion=positiveInteger(body.versao,'Versao');const idempotencyKey=uuid(body.idempotencia,'Idempotencia');
+export async function distribute(walletInput:unknown,collaboratorInput:unknown,body:Record<string,unknown>){
+  const walletId=positiveInteger(walletInput,'Carteira');const collaboratorId=positiveInteger(collaboratorInput,'Colaborador autenticado');const expectedVersion=positiveInteger(body.versao,'Versao');const idempotencyKey=uuid(body.idempotencia,'Idempotencia');
   if(!Array.isArray(body.alocacoes))throw appError('Alocacoes devem ser uma lista.',400);
   const allocations:AllocationInput[]=body.alocacoes.map((raw)=>{const item=raw as Record<string,unknown>;const category=String(item.categoria??'').toUpperCase();if(!BENEFIT_CATEGORIES.includes(category as BenefitCategory))throw appError(`Categoria ${category} invalida.`,400);const amountCents=Number(item.valorCentavos);if(!Number.isSafeInteger(amountCents)||amountCents<0)throw appError(`Valor invalido para ${category}.`,400);return{category:category as BenefitCategory,amountCents};});
-  const payload={walletId,expectedVersion,allocations};
-  return repository.distribute({walletId,expectedVersion,idempotencyKey,payloadHash:stablePayloadHash(payload),allocations});
+  const payload={walletId,collaboratorId,expectedVersion,allocations};
+  return repository.distribute({walletId,collaboratorId,expectedVersion,idempotencyKey,payloadHash:stablePayloadHash(payload),allocations});
 }
 
 export async function submitReimbursement(body:Record<string,unknown>,file:Express.Multer.File|undefined){
-  if(!file)throw appError('Comprovante obrigatorio.',400);validateReceiptFile(file.buffer,file.mimetype,file.size);
+  if(!file)throw appError('Comprovante obrigatorio.',400);validateReceiptFile(file.buffer,file.mimetype,file.size);await scanBuffer(file.buffer,{filename:file.originalname,mime:file.mimetype});
   const collaboratorId=positiveInteger(body.colaboradorId,'Colaborador');const idempotencyKey=uuid(body.idempotencia??randomUUID(),'Idempotencia');
   const duplicate=await repository.findReimbursementByKey(idempotencyKey);if(duplicate)return{reimbursement:duplicate,reused:true};
   const transactionId=body.transacaoCartaoId?positiveInteger(body.transacaoCartaoId,'Transacao'):null;

@@ -5,7 +5,7 @@ import * as controller from './performanceController.js';
 
 const router=Router();
 router.use(authMiddleware);
-router.get('/dashboard',authorize('performance.read'),controller.dashboard);
+router.get('/dashboard',authorize('performance.read','performance.manage.team','performance.manage.all'),controller.dashboard);
 router.post('/ciclos/:cicloId/recalcular',authorize('performance.manage'),controller.recalculate);
 router.post('/resultados/:resultadoId/calibrar',authorize('performance.manage'),controller.calibrate);
 router.patch('/okrs/:okrId/progresso',authorize('performance.manage'),controller.updateOkr);

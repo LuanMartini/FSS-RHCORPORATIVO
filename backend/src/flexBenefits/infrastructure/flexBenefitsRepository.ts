@@ -33,16 +33,18 @@ export async function dashboard(collaboratorId:number|null,competence:string):Pr
   return{collaborators,wallet,limits:limitRows.map(mapLimit),allocations,transactions,reimbursements,approvalRules};
 }
 
-export async function distribute(input:{walletId:number;expectedVersion:number;idempotencyKey:string;payloadHash:string;allocations:AllocationInput[]}):Promise<Row>{
+export async function distribute(input:{walletId:number;collaboratorId:number;expectedVersion:number;idempotencyKey:string;payloadHash:string;allocations:AllocationInput[]}):Promise<Row>{
   return withTransaction(async(tx)=>{
-    const existing=await tx.all(`SELECT payload_sha256,resposta FROM operacoes_carteira WHERE chave_idempotencia=?::uuid`,[input.idempotencyKey]) as Row[];
+    const existing=await tx.all(`SELECT o.payload_sha256,o.resposta FROM operacoes_carteira o
+      JOIN carteira_colaborador c ON c.id=o.carteira_id
+      WHERE o.chave_idempotencia=?::uuid AND c.colaborador_id=?`,[input.idempotencyKey,input.collaboratorId]) as Row[];
     if(existing[0]){
       if(existing[0].payload_sha256!==input.payloadHash)throw appError('Chave de idempotencia reutilizada com outro conteudo.',409,'IDEMPOTENCY_CONFLICT');
       return existing[0].resposta as Row;
     }
     const wallets=await tx.all(`SELECT c.*,col.departamento_id FROM carteira_colaborador c
-      JOIN colaboradores col ON col.id=c.colaborador_id WHERE c.id=? FOR UPDATE`,[input.walletId]) as Row[];
-    const wallet=wallets[0];if(!wallet)throw appError('Carteira nao encontrada.',404,'WALLET_NOT_FOUND');
+      JOIN colaboradores col ON col.id=c.colaborador_id WHERE c.id=? AND c.colaborador_id=? FOR UPDATE`,[input.walletId,input.collaboratorId]) as Row[];
+    const wallet=wallets[0];if(!wallet)throw appError('Carteira nao pertence ao colaborador autenticado.',403,'WALLET_OWNER_FORBIDDEN');
     if(wallet.status!=='ABERTA')throw appError('Carteira fechada ou bloqueada.',409,'WALLET_NOT_OPEN');
     if(Number(wallet.versao)!==input.expectedVersion)throw appError('A carteira foi alterada em outra sessao.',409,'WALLET_VERSION_CONFLICT');
     const limitRows=await tx.all(`SELECT DISTINCT ON (categoria) * FROM limites_beneficios

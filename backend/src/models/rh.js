@@ -1,10 +1,10 @@
-import { all, run, isMysql } from '../db/client.js';
+import { all, run, isMysql, withTransaction } from '../db/client.js';
 
 export function rowToFuncionario(row) {
   return {
     id: row.id,
     nome: row.nome,
-    salario: Number(row.salario),
+    salario: row.salario == null ? undefined : Number(row.salario),
     cpf: row.cpf,
     email: row.email,
     status: row.status,
@@ -109,20 +109,25 @@ export async function countPontoHoje() {
   return Number(rows[0]?.c ?? 0);
 }
 
-export async function listFerias() {
+export async function listFerias(scope={all:true,managerId:null}) {
+  if(!scope.all&&scope.managerId==null)return [];
+  const filter=scope.all?'':`WHERE (c.id=? OR c.gestor_id=?)`;
+  const params=scope.all?[]:[scope.managerId,scope.managerId];
   const rows = await all(
-    `SELECT f.id, f.funcionario_id AS funcionarioId, f.data_inicio AS dataInicio, f.data_fim AS dataFim,
-            f.status, fu.nome AS fnome
+    `SELECT f.id, f.colaborador_id AS funcionarioId, f.data_inicio AS dataInicio, f.data_fim AS dataFim,
+            f.status,f.versao,f.dias,COALESCE(c.nome_social,c.nome_completo) AS fnome
      FROM ferias f
-     LEFT JOIN funcionarios fu ON f.funcionario_id = fu.id
-     ORDER BY f.id DESC`
+     JOIN colaboradores c ON f.colaborador_id = c.id
+     ${filter} ORDER BY f.id DESC LIMIT 200`,params
   );
   return rows.map((r) => ({
     id: r.id,
     funcionarioId: r.funcionarioId,
     dataInicio: formatDate(r.dataInicio),
     dataFim: formatDate(r.dataFim),
-    status: r.status,
+      status: r.status,
+      versao: Number(r.versao),
+      dias: Number(r.dias),
     funcionario: r.fnome ? { nome: r.fnome } : null,
   }));
 }
@@ -134,12 +139,34 @@ function formatDate(v) {
   return d.toISOString().slice(0, 10);
 }
 
-export async function createFeria(body) {
-  await run(
-    `INSERT INTO ferias (funcionario_id, data_inicio, data_fim, observacao, status)
-     VALUES (?, ?, ?, ?, 'PENDENTE')`,
-    [body.funcionarioId, body.dataInicio, body.dataFim, body.observacao ?? null]
-  );
+export async function createFeria(body,actor={}) {
+  const collaboratorId=Number(body.funcionarioId);
+  const start=new Date(`${body.dataInicio}T00:00:00Z`);const end=new Date(`${body.dataFim}T00:00:00Z`);
+  const days=Math.floor((end.getTime()-start.getTime())/86400000)+1;
+  if(!Number.isInteger(days)||days<1||days>30)throw Object.assign(new Error('Periodo de ferias deve possuir entre 1 e 30 dias.'),{status:422,code:'INVALID_LEAVE_PERIOD'});
+  return withTransaction(async(tx)=>{
+    const collaborators=await tx.all('SELECT id FROM colaboradores WHERE id=? AND status<>\'DESLIGADO\' FOR UPDATE',[collaboratorId]);
+    if(!collaborators[0])throw Object.assign(new Error('Colaborador nao encontrado ou desligado.'),{status:404,code:'COLLABORATOR_NOT_FOUND'});
+    const overlaps=await tx.all(`SELECT 1 FROM ferias WHERE colaborador_id=?
+      AND status IN ('PENDENTE','APROVADA','EM_GOZO')
+      AND daterange(data_inicio,data_fim,'[]') && daterange(?::date,?::date,'[]') LIMIT 1`,[collaboratorId,body.dataInicio,body.dataFim]);
+    if(overlaps[0])throw Object.assign(new Error('Existe outro periodo de ferias conflitante.'),{status:409,code:'LEAVE_OVERLAP'});
+    const periods=await tx.all(`SELECT * FROM periodos_aquisitivos_ferias WHERE colaborador_id=?
+      AND disponivel_em<=?::date AND dias_direito-dias_utilizados>=? ORDER BY inicio_em FOR UPDATE LIMIT 1`,[collaboratorId,body.dataInicio,days]);
+    if(!periods[0])throw Object.assign(new Error('Saldo de ferias disponivel insuficiente para o periodo.'),{status:422,code:'INSUFFICIENT_LEAVE_BALANCE'});
+    const rows=await tx.all(`INSERT INTO ferias
+      (colaborador_id,data_inicio,data_fim,dias,observacao,status,periodo_aquisitivo_id)
+      VALUES (?,?,?,?,?,'PENDENTE',?) RETURNING *`,[collaboratorId,body.dataInicio,body.dataFim,days,body.observacao??null,periods[0].id]);
+    await tx.run(`INSERT INTO audit_outbox(ator_usuario_id,ator_referencia,acao,recurso_tipo,recurso_id,metadados)
+      VALUES (?,?,'LEAVE_REQUESTED','FERIAS',?,?::jsonb)`,[actor.userId??null,actor.reference??'sistema',String(rows[0].id),JSON.stringify({collaboratorId,start:body.dataInicio,end:body.dataFim,days})]);
+    return rows[0];
+  });
+}
+
+export async function isManagedCollaborator(managerId,collaboratorId){
+  if(!Number.isInteger(Number(managerId))||!Number.isInteger(Number(collaboratorId)))return false;
+  const rows=await all('SELECT 1 FROM colaboradores WHERE id=? AND gestor_id=? LIMIT 1',[collaboratorId,managerId]);
+  return Boolean(rows[0]);
 }
 
 export async function getFeria(id) {
@@ -147,30 +174,51 @@ export async function getFeria(id) {
   return rows[0] ?? null;
 }
 
-export async function feriasAprovar(id) {
-  const f = await getFeria(id);
-  if (!f) return false;
-  await run(`UPDATE ferias SET status = 'APROVADO' WHERE id = ?`, [id]);
-  await run(`UPDATE funcionarios SET status = 'FERIAS' WHERE id = ?`, [f.funcionario_id]);
-  return true;
+export async function feriasAprovar(id,input={}) {
+  return withTransaction(async(tx)=>{
+    const rows=await tx.all('SELECT * FROM ferias WHERE id=? FOR UPDATE',[id]);const f=rows[0];if(!f)return false;
+    if(f.status!=='PENDENTE')throw Object.assign(new Error('Solicitacao fora do estado pendente.'),{status:409,code:'LEAVE_STATE_CONFLICT'});
+    if(input.versao!=null&&Number(input.versao)!==Number(f.versao))throw Object.assign(new Error('Solicitacao alterada por outra sessao.'),{status:409,code:'LEAVE_VERSION_CONFLICT'});
+    if(!input.all){const managed=await tx.all('SELECT 1 FROM colaboradores WHERE id=? AND gestor_id=?',[f.colaborador_id,input.managerId]);if(!managed[0])throw Object.assign(new Error('Somente o gestor responsavel pode aprovar estas ferias.'),{status:403,code:'LEAVE_MANAGER_FORBIDDEN'});}
+    const periods=await tx.all('SELECT * FROM periodos_aquisitivos_ferias WHERE id=? FOR UPDATE',[f.periodo_aquisitivo_id]);const period=periods[0];
+    if(!period||Number(period.dias_direito)-Number(period.dias_utilizados)<Number(f.dias))throw Object.assign(new Error('Saldo de ferias insuficiente.'),{status:409,code:'INSUFFICIENT_LEAVE_BALANCE'});
+    await tx.run('UPDATE periodos_aquisitivos_ferias SET dias_utilizados=dias_utilizados+?,versao=versao+1,atualizado_em=now() WHERE id=?',[f.dias,period.id]);
+    await tx.run(`UPDATE ferias SET status='APROVADA',decidido_em=now(),decidido_por=?,versao=versao+1,atualizado_em=now() WHERE id=?`,[input.userId,id]);
+    await tx.run(`INSERT INTO audit_outbox(ator_usuario_id,ator_referencia,acao,recurso_tipo,recurso_id,metadados)
+      VALUES (?,'usuario:'||?,'LEAVE_APPROVED','FERIAS',?,?::jsonb)`,[input.userId,String(input.userId),String(id),JSON.stringify({collaboratorId:f.colaborador_id,days:f.dias})]);
+    return true;
+  });
 }
 
-export async function feriasReprovar(id, motivo) {
-  const f = await getFeria(id);
-  if (!f) return false;
-  await run(`UPDATE ferias SET status = 'REPROVADO', observacao = ? WHERE id = ?`, [
-    motivo ?? null,
-    id,
-  ]);
-  return true;
+export async function feriasReprovar(id, motivo,input={}) {
+  return withTransaction(async(tx)=>{const rows=await tx.all('SELECT * FROM ferias WHERE id=? FOR UPDATE',[id]);const f=rows[0];if(!f)return false;
+    if(f.status!=='PENDENTE')throw Object.assign(new Error('Solicitacao fora do estado pendente.'),{status:409,code:'LEAVE_STATE_CONFLICT'});
+    if(input.versao!=null&&Number(input.versao)!==Number(f.versao))throw Object.assign(new Error('Solicitacao alterada por outra sessao.'),{status:409,code:'LEAVE_VERSION_CONFLICT'});
+    if(!input.all){const managed=await tx.all('SELECT 1 FROM colaboradores WHERE id=? AND gestor_id=?',[f.colaborador_id,input.managerId]);if(!managed[0])throw Object.assign(new Error('Somente o gestor responsavel pode reprovar estas ferias.'),{status:403,code:'LEAVE_MANAGER_FORBIDDEN'});}
+    await tx.run(`UPDATE ferias SET status='REPROVADA',observacao=?,decidido_em=now(),decidido_por=?,versao=versao+1,atualizado_em=now() WHERE id=?`,[motivo??null,input.userId,id]);
+    await tx.run(`INSERT INTO audit_outbox(ator_usuario_id,ator_referencia,acao,recurso_tipo,recurso_id,metadados)
+      VALUES (?,'usuario:'||?,'LEAVE_REJECTED','FERIAS',?,'{}'::jsonb)`,[input.userId,String(input.userId),String(id)]);return true;});
 }
 
 export async function feriasEncerrar(id) {
-  const f = await getFeria(id);
-  if (!f) return false;
-  await run(`UPDATE ferias SET status = 'ENCERRADO' WHERE id = ?`, [id]);
-  await run(`UPDATE funcionarios SET status = 'ATIVO' WHERE id = ?`, [f.funcionario_id]);
-  return true;
+  return withTransaction(async(tx)=>{const rows=await tx.all('SELECT * FROM ferias WHERE id=? FOR UPDATE',[id]);const f=rows[0];if(!f)return false;
+    if(f.status!=='EM_GOZO'||new Date(`${String(f.data_fim).slice(0,10)}T23:59:59Z`).getTime()>Date.now())throw Object.assign(new Error('Ferias ainda nao podem ser encerradas.'),{status:409,code:'LEAVE_STATE_CONFLICT'});
+    await tx.run(`UPDATE ferias SET status='ENCERRADA',versao=versao+1,atualizado_em=now() WHERE id=?`,[id]);
+    await tx.run(`UPDATE colaboradores SET status='ATIVO',versao=versao+1,updated_at=now() WHERE id=?
+      AND NOT EXISTS(SELECT 1 FROM ferias WHERE colaborador_id=? AND status='EM_GOZO' AND id<>?)`,[f.colaborador_id,f.colaborador_id,id]);return true;});
+}
+
+export async function sincronizarFerias() {
+  return withTransaction(async(tx)=>{
+    const started=await tx.all(`UPDATE ferias SET status='EM_GOZO',versao=versao+1,atualizado_em=now()
+      WHERE status='APROVADA' AND current_date BETWEEN data_inicio AND data_fim RETURNING colaborador_id`);
+    for(const row of started)await tx.run(`UPDATE colaboradores SET status='AFASTADO',versao=versao+1,updated_at=now() WHERE id=? AND status='ATIVO'`,[row.colaborador_id]);
+    const ended=await tx.all(`UPDATE ferias SET status='ENCERRADA',versao=versao+1,atualizado_em=now()
+      WHERE status='EM_GOZO' AND data_fim<current_date RETURNING colaborador_id`);
+    for(const row of ended)await tx.run(`UPDATE colaboradores SET status='ATIVO',versao=versao+1,updated_at=now() WHERE id=?
+      AND NOT EXISTS(SELECT 1 FROM ferias WHERE colaborador_id=? AND status='EM_GOZO')`,[row.colaborador_id,row.colaborador_id]);
+    return{started:started.length,ended:ended.length};
+  });
 }
 
 export async function listAdvertencias() {
@@ -265,11 +313,14 @@ export async function inscreverTreinamento(funcionarioId, treinamentoId) {
 }
 
 export async function countsFuncionarios() {
-  const rows = await all(`SELECT status, COUNT(*) AS c FROM funcionarios GROUP BY status`);
+  const rows = await all(`SELECT status, COUNT(*) AS c FROM colaboradores GROUP BY status`);
   const m = { ATIVO: 0, DESLIGADO: 0, FERIAS: 0 };
   for (const r of rows) {
-    if (m[r.status] !== undefined) m[r.status] = Number(r.c);
+    if (r.status === 'ATIVO') m.ATIVO = Number(r.c);
+    if (r.status === 'DESLIGADO') m.DESLIGADO = Number(r.c);
   }
+  const activeLeave = await all(`SELECT COUNT(DISTINCT colaborador_id) AS c FROM ferias WHERE status='EM_GOZO'`);
+  m.FERIAS = Number(activeLeave[0]?.c ?? 0);
   return m;
 }
 
@@ -277,7 +328,7 @@ export async function countsDeptDist() {
   return all(
     `SELECT d.nome AS departamento, d.sigla, COUNT(f.id) AS total
      FROM departamentos d
-     LEFT JOIN funcionarios f ON f.departamento_id = d.id AND f.status <> 'DESLIGADO'
+     LEFT JOIN colaboradores f ON f.departamento_id = d.id AND f.status <> 'DESLIGADO'
      GROUP BY d.id, d.nome, d.sigla
      ORDER BY d.nome`
   );
@@ -291,8 +342,8 @@ export async function countsCargosDeptos() {
 
 export async function listFuncionariosComSalario() {
   return all(
-    `SELECT id, nome, cpf, salario, cargo_id FROM funcionarios
-     WHERE status IN ('ATIVO','FERIAS')`
+    `SELECT id,COALESCE(nome_social,nome_completo) AS nome,cpf,salario,cargo_id FROM colaboradores
+     WHERE status IN ('ATIVO','AFASTADO')`
   );
 }
 
@@ -336,4 +387,28 @@ export async function listCandidatos(vagaId) {
 
 export async function updateFaseCandidato(id, fase) {
   await run(`UPDATE candidatos SET fase = ? WHERE id = ?`, [fase, id]);
+}
+
+export async function listFuncionariosScoped(input) {
+  if (!input.canReadAll && input.collaboratorId == null) return [];
+  const scope = input.canReadAll
+    ? ''
+    : `AND (col.id=? OR col.gestor_id=?)`;
+  const params = [input.canReadSalary, input.canReadSensitive, input.cursor];
+  if (!input.canReadAll) params.push(input.collaboratorId, input.collaboratorId);
+  params.push(input.limit);
+  const rows = await all(
+    `SELECT col.id,COALESCE(col.nome_social,col.nome_completo) AS nome,
+            CASE WHEN ? THEN col.salario ELSE NULL END AS salario,
+            CASE WHEN ? THEN col.cpf ELSE NULL END AS cpf,
+            col.email,col.status,ca.nome AS cargo_nome,d.nome AS dept_nome
+       FROM colaboradores col
+       LEFT JOIN cargos ca ON ca.id=col.cargo_id
+       LEFT JOIN departamentos d ON d.id=col.departamento_id
+      WHERE col.id>? ${scope}
+      ORDER BY col.id
+      LIMIT ?`,
+    params,
+  );
+  return rows.map(rowToFuncionario);
 }

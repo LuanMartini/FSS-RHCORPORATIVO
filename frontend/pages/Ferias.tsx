@@ -8,6 +8,7 @@ interface FeriasItem {
   dataInicio: string;
   dataFim: string;
   status: string;
+  versao: number;
   funcionario?: { nome: string } | null;
 }
 
@@ -73,8 +74,9 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
         tipo === 'aprovar' ? `/rh/ferias/${id}/aprovar`
           : tipo === 'reprovar' ? `/rh/ferias/${id}/reprovar`
             : `/rh/ferias/${id}/encerrar`;
-      const body = tipo === 'reprovar' ? JSON.stringify({ motivo: 'Reprovado pelo gestor' }) : undefined;
-      await apiFetch(path, { method: 'PATCH', ...(body ? { body } : {}) });
+      const versao=lista.find((item)=>item.id===id)?.versao;
+      const body = JSON.stringify({ ...(tipo === 'reprovar' ? { motivo: 'Reprovado pelo gestor' } : {}), versao });
+      await apiFetch(path, { method: 'PATCH', body });
       await carregar();
       onRefresh();
     } catch (e) {
@@ -170,7 +172,7 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
                       </button>
                     </>
                   )}
-                  {row.status === 'APROVADO' && (
+                  {row.status === 'EM_GOZO' && (
                     <button
                       type="button"
                       disabled={busy === row.id}

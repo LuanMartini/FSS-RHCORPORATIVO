@@ -5,7 +5,7 @@ import { signToken } from '../middleware/auth.js';
 import { requiredString, validEmail, validate } from '../utils/validation.js';
 import { loadPrincipal } from '../middleware/authorization.js';
 
-export async function login(req, res) {
+export async function login(req, res, next) {
   try {
     const { email, senha } = req.body ?? {};
     const errors = validate([
@@ -23,21 +23,15 @@ export async function login(req, res) {
     const token = signToken({ sub: u.id, email: u.email, sv: Number(u.session_version ?? 1) });
     res.json({
       token,
-      expiresInSeconds: 600,
+      expiresInSeconds: getEnv().jwtAccessTtlSeconds,
       usuario: { nome: u.nome, email: u.email, perfil: u.perfil, permissoes: permissions },
     });
-  } catch (e) {
-    res.status(500).json({ erro: e.message || 'Erro no login' });
-  }
+  } catch (e) { next(e); }
 }
 
-export async function registrar(req, res) {
+export async function registrar(req, res, next) {
   try {
-    if (!getEnv().allowAdminRegistration && (await authModel.countUsers()) > 0) {
-      return res.status(403).json({
-        erro: 'Cadastro de administradores desabilitado. Use o administrador inicial ou habilite ALLOW_ADMIN_REGISTRATION=true.',
-      });
-    }
+    if (getEnv().isProduction) return res.status(404).json({ erro: 'Rota nao encontrada' });
 
     const { nome, email, senha } = req.body ?? {};
     const errors = validate([
@@ -49,16 +43,10 @@ export async function registrar(req, res) {
     if (errors) return res.status(400).json({ erro: errors[0], detalhes: errors });
 
     const em = String(email).trim().toLowerCase();
-    if (await authModel.findUserByEmail(em)) {
-      return res.status(409).json({ erro: 'E-mail ja cadastrado' });
-    }
-
     const senhaHash = await bcrypt.hash(String(senha), 12);
-    await authModel.createUser({ nome: String(nome).trim(), email: em, senhaHash });
+    await authModel.bootstrapAdministrator({ nome: String(nome).trim(), email: em, senhaHash });
     res.status(201).json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ erro: e.message || 'Erro ao registrar' });
-  }
+  } catch (e) { next(e); }
 }
 
 export async function me(req, res, next) {
