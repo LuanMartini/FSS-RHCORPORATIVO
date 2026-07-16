@@ -6,6 +6,7 @@ Configure estas variaveis no servidor do backend:
 
 ```env
 PORT=3333
+DOTENV_CONFIG_QUIET=true
 JWT_SECRET=gere-um-segredo-longo
 JWT_ISSUER=rhcorp-api
 JWT_AUDIENCE=rhcorp-web
