@@ -44,7 +44,7 @@ jobs:
       JWT_SECRET: ci-secret-not-for-production
       AUDIT_LEDGER_SECRET: ci-audit-secret-not-for-production
       AUDIT_PAYLOAD_KEY: 42b519c09038fe9d1d67f6f41f0ab804a69c33fb6424eeaff953f9210b917c9e
-      DOCUMENT_ENCRYPTION_KEY: 147b46aff73c02e17a56d7292f4ee395f4d8182af0b466a968f655e081eaa4fb
+      DOCUMENT_ENCRYPTION_KEY: yPNwrDs9061fzgcHHL9eND8uShSkResfsobffaEyAUw=
       PG_HOST: localhost
       PG_PORT: 5432
       PG_USER: postgres
@@ -52,6 +52,8 @@ jobs:
       PG_DATABASE: rhcorp
       REDIS_URL: redis://localhost:6379
       RUN_DB_INTEGRATION: 1
+      SEED_ADMIN_EMAIL: admin-ci@example.invalid
+      SEED_ADMIN_PASSWORD: ci-admin-password-not-for-production
 
     steps:
       - name: Checkout
@@ -80,6 +82,10 @@ jobs:
 
       - name: Migrate database
         run: npm run db:migrate
+        working-directory: backend
+
+      - name: Seed integration fixtures
+        run: npm run db:seed
         working-directory: backend
 
       - name: Verify database integrity
