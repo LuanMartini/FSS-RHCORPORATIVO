@@ -42,9 +42,10 @@ export default function Holerite({ funcionarios }: Props) {
 
       <div className="flex flex-wrap gap-3 items-end bg-white border border-slate-200 rounded-lg p-4">
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Funcionário</label>
+          <label htmlFor="holerite-funcionario" className="block text-xs font-semibold text-slate-500 mb-1">Funcionário</label>
           <select
             value={id}
+            id="holerite-funcionario"
             onChange={e => setId(e.target.value)}
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
           >
@@ -64,10 +65,11 @@ export default function Holerite({ funcionarios }: Props) {
         </button>
       </div>
 
-      {erro && <p className="text-red-600 text-sm">{erro}</p>}
+      {erro && <p role="alert" aria-live="assertive" className="text-red-700 text-sm">{erro}</p>}
 
       {h && (
-        <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-2 text-sm">
+        <section aria-live="polite" aria-labelledby="holerite-gerado" className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-2 text-sm">
+          <h3 id="holerite-gerado" className="sr-only">Holerite gerado</h3>
           <p><strong>Referência:</strong> {h.mesReferencia}/{h.anoReferencia}</p>
           <p><strong>Nome:</strong> {h.funcionario.nome}</p>
           <p><strong>CPF:</strong> {h.funcionario.cpf}</p>
@@ -80,7 +82,7 @@ export default function Holerite({ funcionarios }: Props) {
           <p><strong>Total bruto:</strong> R$ {h.totalBruto}</p>
           <p><strong>Total descontos:</strong> R$ {h.totalDescontos}</p>
           <p className="text-lg font-semibold text-[#0f2340]"><strong>Líquido:</strong> R$ {h.totalLiquido}</p>
-        </div>
+        </section>
       )}
     </div>
   );

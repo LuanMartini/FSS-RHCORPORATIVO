@@ -2,7 +2,7 @@ import { withTransaction } from '../../db/client.js';
 import { DOCUMENT_TYPES } from '../domain/contracts.js';
 import { AppError, assertFound } from '../domain/errors.js';
 import * as repository from '../infrastructure/coreRepository.js';
-import { simulateOcr } from '../infrastructure/ocrSimulator.js';
+import { extractDocument, OcrProviderError } from '../infrastructure/ocrProvider.ts';
 import { removeEncrypted, saveEncrypted, sha256 } from '../infrastructure/encryptedFileStorage.js';
 import { scanBuffer } from '../../security/malwareScanner.js';
 
@@ -34,17 +34,22 @@ export async function uploadDocument({ collaboratorId, type, fileName, mimeType,
   await scanBuffer(buffer,{filename:fileName,mime:mimeType});
   let storageKey;
   try {
+    const ocr = await extractDocument(buffer, mimeType, type);
     return await withTransaction(async (client) => {
-      const collaborator = assertFound(await repository.getAdmission(collaboratorId, client), 'Colaborador nao encontrado.');
-      const ocr = simulateOcr({ type, fileName, collaborator });
+      assertFound(await repository.getAdmission(collaboratorId, client), 'Colaborador nao encontrado.');
       storageKey = await saveEncrypted(buffer);
       return repository.insertDocument({
         collaboratorId, type, fileName, mimeType, size: buffer.length, storageKey,
-        checksum: sha256(buffer), ocrMetadata: ocr.metadata, ocrConfidence: ocr.confidence,
+        checksum: sha256(buffer),
+        ocrMetadata: { ...ocr.metadata, revisaoHumanaObrigatoria: ocr.requiresManualReview },
+        ocrConfidence: ocr.confidence,
       }, client);
     });
   } catch (error) {
     if (storageKey) await removeEncrypted(storageKey);
+    if (error instanceof OcrProviderError) {
+      throw new AppError(error.message, error.code === 'OCR_PROVIDER_UNAVAILABLE' ? 503 : 422, error.code);
+    }
     throw error;
   }
 }

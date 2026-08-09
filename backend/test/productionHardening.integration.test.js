@@ -2,6 +2,8 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import 'dotenv/config';
 
 const enabled = process.env.RUN_DB_INTEGRATION === '1';
 if (enabled) process.env.NODE_ENV = 'test';
@@ -232,4 +234,44 @@ test('ferias serializam concorrencia, impedem sobreposicao e nao afastam antes d
     const unchanged=(await all('SELECT status FROM colaboradores WHERE id=?',[collaborator.id]))[0];assert.equal(unchanged.status,'ATIVO');
     await assert.rejects(()=>rh.feriasAprovar(leave.id,{versao:leave.versao,userId:1,all:true}),(error)=>error?.code==='LEAVE_STATE_CONFLICT');
   }finally{await all(`DELETE FROM audit_outbox WHERE recurso_tipo='FERIAS' AND metadados->>'collaboratorId'=? RETURNING id`,[String(collaborator.id)]);await all('DELETE FROM ferias WHERE colaborador_id=? RETURNING id',[collaborator.id]);await all('DELETE FROM periodos_aquisitivos_ferias WHERE id=? RETURNING id',[period.id]);await all('DELETE FROM colaboradores WHERE id=? RETURNING id',[collaborator.id]);}
+});
+
+test('marcacao com baixa semelhanca facial e recusada antes de ser gravada', { skip: !enabled }, async () => {
+  const { all } = await import('../src/db/client.js');
+  const service = await import('../src/jornada/application/journeyService.ts');
+  const { removeEncrypted } = await import('../src/core/infrastructure/encryptedFileStorage.js');
+  const suffix = String(Date.now()).slice(-9);
+  const base = (await all(`SELECT c.id AS cargo_id,c.departamento_id,f.id AS filial_id,f.latitude,f.longitude
+    FROM cargos c JOIN filiais f ON f.ativo WHERE c.ativo ORDER BY c.id,f.id LIMIT 1`))[0];
+  assert.ok(base);
+  const collaborator = (await all(`INSERT INTO colaboradores
+    (nome_completo,cpf,email,cargo_id,departamento_id,filial_id,status,etapa_admissao,lifecycle_status)
+    VALUES ('Biometria Integracao',?,?,?,?,?,'ATIVO','CONCLUIDA','ATIVO') RETURNING id`, [
+    `96${suffix.padStart(9, '0')}`.slice(0, 11), `facial-${Date.now()}@example.invalid`,
+    base.cargo_id, base.departamento_id, base.filial_id,
+  ]))[0];
+  const reference = await readFile(new URL('./fixtures/faces/synthetic-person-a-reference.png', import.meta.url));
+  const different = await readFile(new URL('./fixtures/faces/synthetic-person-b-reference.png', import.meta.url));
+  const asDataUrl = (photo) => `data:image/png;base64,${photo.toString('base64')}`;
+  try {
+    await service.enrollBiometric({
+      collaboratorId: collaborator.id, photoBase64: asDataUrl(reference), consent: true, ipAddress: '127.0.0.1',
+    });
+    await assert.rejects(
+      () => service.registerPoint({
+        collaboratorId: collaborator.id, type: 'ENTRADA', latitude: Number(base.latitude), longitude: Number(base.longitude),
+        accuracyMeters: 5, photoBase64: asDataUrl(different), idempotencyKey: randomUUID(), collectorId: 'teste-biometria',
+        ipAddress: '127.0.0.1', userAgent: 'node-test',
+      }),
+      (error) => error?.code === 'BIOMETRIC_MISMATCH' && error?.status === 422,
+    );
+    const points = await all('SELECT count(*)::int AS total FROM pontos_registrados WHERE colaborador_id=?', [collaborator.id]);
+    assert.equal(Number(points[0]?.total), 0);
+  } finally {
+    const stored = await all(`SELECT foto_storage_key FROM biometrias_faciais WHERE colaborador_id=?
+      UNION ALL SELECT foto_storage_key FROM pontos_registrados WHERE colaborador_id=?`, [collaborator.id, collaborator.id]);
+    await Promise.all(stored.map((row) => removeEncrypted(row.foto_storage_key)));
+    await all('DELETE FROM consentimentos_dados WHERE colaborador_id=? RETURNING id', [collaborator.id]);
+    await all('DELETE FROM colaboradores WHERE id=? RETURNING id', [collaborator.id]);
+  }
 });

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import 'leaflet/dist/leaflet.css';
 import { Circle, CircleMarker, MapContainer, Polygon, TileLayer, useMap } from 'react-leaflet';
 import { apiFetch } from '../../services/api';
+import { useFocusTrap } from '../a11y/useFocusTrap';
 import type { JornadaConfig, RegistroPontoResposta, TipoMarcacao } from '../../types/jornada';
 
 interface Position {
@@ -52,6 +54,7 @@ const punchOptions: Array<{ type: TipoMarcacao; label: string; short: string }> 
 export default function ClockModal({ collaboratorId, config, onClose, onRegistered, onBiometricEnrolled }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dialogRef = useFocusTrap<HTMLDivElement>(true, onClose);
   const [position, setPosition] = useState<Position | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [type, setType] = useState<TipoMarcacao>('ENTRADA');
@@ -140,11 +143,11 @@ export default function ClockModal({ collaboratorId, config, onClose, onRegister
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="max-h-[96vh] w-full max-w-5xl overflow-auto rounded-3xl bg-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="clock-modal-title" className="max-h-[96vh] w-full max-w-5xl overflow-auto rounded-3xl bg-white shadow-2xl">
         <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur">
-          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700">Marcação segura</p><h2 className="text-lg font-semibold text-slate-950">{config.collaborator.name}</h2></div>
-          <button type="button" onClick={onClose} className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600 hover:bg-slate-200">Fechar</button>
+          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700">Marcação segura</p><h2 id="clock-modal-title" className="text-lg font-semibold text-slate-950">{config.collaborator.name}</h2></div>
+          <button type="button" onClick={onClose} aria-label="Fechar marcação de ponto" className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600 hover:bg-slate-200">Fechar</button>
         </header>
         <div className="grid gap-5 p-5 lg:grid-cols-2">
           <section>
@@ -155,7 +158,7 @@ export default function ClockModal({ collaboratorId, config, onClose, onRegister
               <span className="absolute left-4 top-4 rounded-full bg-slate-950/70 px-3 py-1 text-xs font-medium text-white">{cameraReady ? 'Câmera ativa' : 'Inicializando...'}</span>
               <button type="button" onClick={() => photo ? setPhoto(null) : capture()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full border-4 border-white bg-sky-600 px-6 py-4 text-xs font-bold text-white shadow-xl">{photo ? 'REFAZER' : 'CAPTURAR'}</button>
             </div>
-            {cameraError && <p className="mt-2 text-xs text-red-600">{cameraError}</p>}
+            {cameraError && <p role="alert" className="mt-2 text-xs text-red-700">{cameraError}</p>}
           </section>
           <section className="flex flex-col gap-4">
             <div className="h-56 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100">
@@ -165,9 +168,9 @@ export default function ClockModal({ collaboratorId, config, onClose, onRegister
               <div><p className="text-slate-400">Filial</p><p className="mt-1 font-semibold text-slate-700">{config.branch.name}</p></div>
               <div><p className="text-slate-400">Precisão GPS</p><p className="mt-1 font-semibold text-slate-700">{position ? `± ${Math.round(position.accuracy)} m` : '—'}</p></div>
             </div>
-            {locationError && <p className="text-xs text-red-600">{locationError}</p>}
-            <div><p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Tipo de marcação</p><div className="grid grid-cols-2 gap-2">{punchOptions.map((option) => <button key={option.type} type="button" onClick={() => setType(option.type)} className={`rounded-xl border p-3 text-left transition ${type === option.type ? 'border-sky-500 bg-sky-50 text-sky-800 ring-2 ring-sky-100' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}><span className="mr-2 text-[10px] font-black">{option.short}</span><span className="text-xs font-semibold">{option.label}</span></button>)}</div></div>
-            {actionError && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{actionError}</div>}
+            {locationError && <p role="alert" className="text-xs text-red-700">{locationError}</p>}
+            <div><p id="punch-type-label" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Tipo de marcação</p><div role="group" aria-labelledby="punch-type-label" className="grid grid-cols-2 gap-2">{punchOptions.map((option) => <button key={option.type} type="button" aria-pressed={type === option.type} onClick={() => setType(option.type)} className={`rounded-xl border p-3 text-left transition ${type === option.type ? 'border-sky-500 bg-sky-50 text-sky-800 ring-2 ring-sky-100' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}><span className="mr-2 text-[10px] font-black">{option.short}</span><span className="text-xs font-semibold">{option.label}</span></button>)}</div></div>
+            {actionError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{actionError}</div>}
             {!config.collaborator.biometricEnrolled ? (
               <button type="button" disabled={enrolling || !photo} onClick={() => void enroll()} className="mt-auto rounded-2xl bg-violet-700 px-5 py-3.5 text-sm font-bold text-white disabled:opacity-40">{enrolling ? 'Cadastrando...' : 'Cadastrar biometria com consentimento'}</button>
             ) : (

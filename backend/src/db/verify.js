@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { getPool } from './client.js';
 import { assertSchemaCurrent } from './migrate.js';
+import { initializeErrorTracking, installProcessErrorHandlers, reportError } from '../observability/errorTracking.js';
+import { errorLogFields, logger } from '../observability/logger.js';
 
 async function scalar(pool, sql, params = []) {
   const result = await pool.query(sql, params);
@@ -29,13 +31,16 @@ export async function verifyDatabase() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  initializeErrorTracking();
+  installProcessErrorHandlers();
   verifyDatabase()
     .then(async (report) => {
-      console.log(JSON.stringify({ ok: true, ...report }, null, 2));
+      logger.info({ event: 'database_verified', ...report }, 'Banco verificado');
       await (await getPool()).end();
     })
     .catch(async (error) => {
-      console.error(error.message);
+      logger.fatal({ event: 'database_verify_failed', ...errorLogFields(error) }, 'Falha na verificacao do banco');
+      reportError(error, { source: 'database_verify' });
       try { await (await getPool()).end(); } catch {}
       process.exitCode = 1;
     });

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
 import { CoreRhProvider } from './context/CoreRhContext';
@@ -7,24 +7,29 @@ import Sidebar from './components/Sidebar';
 
 import Login from './pages/Login';
 import Register from './pages/Register';
-import Dashboard, { type MetricasDashboard } from './pages/Dashboard';
-import ListarFuncionarios from './pages/ListarFuncionarios';
-import AdmissaoDigital from './pages/AdmissaoDigital';
-import Organograma from './pages/Organograma';
-import EspelhoPontoAvancado from './pages/EspelhoPontoAvancado';
-import Holerite from './pages/Holerite';
-import FolhaCompleta from './pages/FolhaCompleta';
+import type { MetricasDashboard } from './pages/Dashboard';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ListarFuncionarios = lazy(() => import('./pages/ListarFuncionarios'));
+const AdmissaoDigital = lazy(() => import('./pages/AdmissaoDigital'));
+const Organograma = lazy(() => import('./pages/Organograma'));
+const EspelhoPontoAvancado = lazy(() => import('./pages/EspelhoPontoAvancado'));
+const Holerite = lazy(() => import('./pages/Holerite'));
+const FolhaCompleta = lazy(() => import('./pages/FolhaCompleta'));
 const AtsRecrutamento = lazy(() => import('./pages/AtsRecrutamento'));
 const GestaoDesempenho = lazy(() => import('./pages/GestaoDesempenho'));
 const Beneficios = lazy(() => import('./pages/Beneficios'));
-import Ferias from './pages/Ferias';
+const Ferias = lazy(() => import('./pages/Ferias'));
 const Treinamentos = lazy(() => import('./pages/Treinamentos'));
 const ClimaComunicacao = lazy(() => import('./pages/ClimaComunicacao'));
 const AuditoriaAnalytics = lazy(() => import('./pages/AuditoriaAnalytics'));
-import Advertencias from './pages/Advertencias';
+const Advertencias = lazy(() => import('./pages/Advertencias'));
 
 import type { Page } from './types/page';
 import { mapFuncionarioApi, type FuncionarioView } from './utils/funcionario';
+
+function DeferredPage({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<p className="text-sm text-slate-500">Carregando tela…</p>}>{children}</Suspense>;
+}
 
 function AppShell() {
   const { user, logout } = useAuth();
@@ -89,50 +94,50 @@ function AppShell() {
 
     switch (page) {
       case 'dashboard':
-        return (
+        return <DeferredPage>
           <Dashboard
             metricas={metricas}
             funcionarios={funcionarios}
             setPage={setPage}
           />
-        );
+        </DeferredPage>;
       case 'funcionarios':
-        return (
+        return <DeferredPage>
           <ListarFuncionarios
             funcionarios={funcionarios}
             onRefresh={refreshDados}
           />
-        );
+        </DeferredPage>;
       case 'admitir':
-        return <AdmissaoDigital />;
+        return <DeferredPage><AdmissaoDigital /></DeferredPage>;
       case 'organograma':
-        return <Organograma />;
+        return <DeferredPage><Organograma /></DeferredPage>;
       case 'ponto':
-        return <EspelhoPontoAvancado />;
+        return <DeferredPage><EspelhoPontoAvancado /></DeferredPage>;
       case 'holerite':
-        return <Holerite funcionarios={funcionarios} />;
+        return <DeferredPage><Holerite funcionarios={funcionarios} /></DeferredPage>;
       case 'folha':
-        return <FolhaCompleta />;
+        return <DeferredPage><FolhaCompleta /></DeferredPage>;
       case 'ats':
-        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando workspace de recrutamento…</p>}><AtsRecrutamento /></Suspense>;
+        return <DeferredPage><AtsRecrutamento /></DeferredPage>;
       case 'performance':
-        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando People Analytics…</p>}><GestaoDesempenho /></Suspense>;
+        return <DeferredPage><GestaoDesempenho /></DeferredPage>;
       case 'ferias':
-        return <Ferias funcionarios={funcionarios} onRefresh={refreshDados} />;
+        return <DeferredPage><Ferias funcionarios={funcionarios} onRefresh={refreshDados} /></DeferredPage>;
       case 'beneficios':
-        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando benefícios…</p>}><Beneficios /></Suspense>;
+        return <DeferredPage><Beneficios /></DeferredPage>;
       case 'treinamentos':
-        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando academia corporativa…</p>}><Treinamentos /></Suspense>;
+        return <DeferredPage><Treinamentos /></DeferredPage>;
       case 'clima':
-        return <Suspense fallback={<p className="text-sm text-slate-500">Carregando pulso organizacional…</p>}><ClimaComunicacao /></Suspense>;
+        return <DeferredPage><ClimaComunicacao /></DeferredPage>;
       case 'auditoria':
-        return <Suspense fallback={<p className="text-sm text-slate-500">Validando ledger e analytics…</p>}><AuditoriaAnalytics /></Suspense>;
+        return <DeferredPage><AuditoriaAnalytics /></DeferredPage>;
       case 'advertencias':
-        return <Advertencias funcionarios={funcionarios} onRefresh={refreshDados} />;
+        return <DeferredPage><Advertencias funcionarios={funcionarios} onRefresh={refreshDados} /></DeferredPage>;
       default:
-        return (
+        return <DeferredPage>
           <Dashboard metricas={metricas} funcionarios={funcionarios} setPage={setPage} />
-        );
+        </DeferredPage>;
     }
   };
 

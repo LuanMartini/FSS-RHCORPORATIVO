@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { all, withTransaction } from '../db/client.js';
 
+const CURRENT_BIOMETRIC_POLICY_VERSION = 'BIOMETRIA_V2';
+
 const fail = (message, status = 400, code = 'VALIDATION_ERROR') =>
   Object.assign(new Error(message), { status, code });
 
@@ -91,8 +93,8 @@ export async function recordBiometricConsent(body, ip, userAgent) {
   const collaboratorId = positive(body.colaboradorId);
   const granted = body.concedido === true;
   const version = String(body.versaoPolitica ?? '').trim();
-  if (!/^BIOMETRIA_V\d+$/.test(version)) {
-    throw fail('Versao da politica biometrica invalida.');
+  if (version !== CURRENT_BIOMETRIC_POLICY_VERSION) {
+    throw fail(`A politica biometrica vigente e ${CURRENT_BIOMETRIC_POLICY_VERSION}.`);
   }
 
   return withTransaction(async (tx) => {

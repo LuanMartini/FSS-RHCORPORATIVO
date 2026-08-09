@@ -13,30 +13,15 @@ export function rowToFuncionario(row) {
   };
 }
 
-export async function listFuncionarios() {
-  const rows = await all(
-    `SELECT f.id, f.nome, f.salario, f.cpf, f.email, f.status, f.cargo_id,
-      c.nome AS cargo_nome, d.nome AS dept_nome
-     FROM funcionarios f
-     JOIN cargos c ON f.cargo_id = c.id
-     JOIN departamentos d ON f.departamento_id = d.id
-     ORDER BY f.id`
-  );
-  return rows.map(rowToFuncionario);
-}
-
 export async function getFuncionarioAtivo(id) {
   const rows = await all(
-    `SELECT f.*, c.id AS cargo_id FROM funcionarios f
-     JOIN cargos c ON f.cargo_id = c.id
-     WHERE f.id = ? AND f.status IN ('ATIVO','FERIAS')`,
+    `SELECT c.id, COALESCE(c.nome_social,c.nome_completo) AS nome, c.cpf, c.email,
+            c.salario, c.cargo_id, c.departamento_id, c.status
+       FROM colaboradores c
+      WHERE c.id = ? AND c.status IN ('ATIVO','AFASTADO')`,
     [id]
   );
   return rows[0] ?? null;
-}
-
-export async function desligarFuncionario(id) {
-  await run(`UPDATE funcionarios SET status = 'DESLIGADO' WHERE id = ?`, [id]);
 }
 
 export async function listCargos() {
@@ -53,24 +38,6 @@ export async function listCargos() {
 
 export async function listDepartamentos() {
   return all('SELECT id, nome, sigla FROM departamentos ORDER BY id');
-}
-
-export async function admitir(body) {
-  await run(
-    `INSERT INTO funcionarios
-      (nome, cpf, email, cargo_id, departamento_id, salario, telefone, data_nascimento, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ATIVO')`,
-    [
-      body.nome,
-      body.cpf,
-      body.email,
-      body.cargoId,
-      body.departamentoId,
-      body.salario,
-      body.telefone ?? null,
-      body.dataNascimento ?? null,
-    ]
-  );
 }
 
 export async function insertPonto(funcionarioId, tipo) {
@@ -224,9 +191,10 @@ export async function sincronizarFerias() {
 export async function listAdvertencias() {
   const rows = await all(
     `SELECT a.id, a.funcionario_id AS funcionarioId, a.tipo, a.descricao,
-            a.data_ocorrencia AS dataOcorrencia, fu.nome AS fnome
+            a.data_ocorrencia AS dataOcorrencia, COALESCE(c.nome_social,c.nome_completo) AS fnome
      FROM advertencias a
-     LEFT JOIN funcionarios fu ON a.funcionario_id = fu.id
+     LEFT JOIN funcionarios_colaboradores m ON m.funcionario_id = a.funcionario_id
+     LEFT JOIN colaboradores c ON c.id = m.colaborador_id
      ORDER BY a.id DESC`
   );
   return rows.map((r) => ({

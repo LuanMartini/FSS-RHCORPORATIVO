@@ -62,10 +62,11 @@ export default function Register({ onSwitch }: Props) {
 
           <form onSubmit={handle} className="space-y-5">
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+              <label htmlFor="register-nome" className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
                 Nome completo
               </label>
               <input
+                id="register-nome"
                 type="text"
                 placeholder="João Silva"
                 value={form.nome}
@@ -75,10 +76,11 @@ export default function Register({ onSwitch }: Props) {
               />
             </div>
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+              <label htmlFor="register-email" className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
                 E-mail
               </label>
               <input
+                id="register-email"
                 type="email"
                 placeholder="admin@empresa.com"
                 value={form.email}
@@ -88,10 +90,11 @@ export default function Register({ onSwitch }: Props) {
               />
             </div>
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+              <label htmlFor="register-senha" className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
                 Senha
               </label>
               <input
+                id="register-senha"
                 type="password"
                 placeholder="Mínimo 6 caracteres"
                 value={form.senha}

@@ -1,7 +1,7 @@
-import { createHash, createSign } from 'node:crypto';
 import { formatCents } from '../domain/money.js';
 import type { PayrollResult } from '../domain/types.js';
 import type { PayrollEmployeeRow } from './payrollRepository.js';
+import { signPades } from '../../security/icpBrasilSigner.ts';
 
 function ascii(value: unknown): string {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '');
@@ -58,22 +58,12 @@ export function generatePayslipPdf(employee: PayrollEmployeeRow, competency: str
   return Buffer.from(pdf, 'ascii');
 }
 
-export function signPayslip(pdf: Buffer): {
+export async function signPayslip(pdf: Buffer): Promise<{
+  document: Buffer;
   sha256: string;
   status: string;
-  algorithm: string | null;
+  algorithm: string;
   signatureBase64: string | null;
-} {
-  const sha256 = createHash('sha256').update(pdf).digest('hex');
-  const configuredKey = process.env.PAYROLL_SIGNING_PRIVATE_KEY?.replace(/\\n/g, '\n');
-  if (!configuredKey) return { sha256, status: 'PENDENTE_CERTIFICADO', algorithm: null, signatureBase64: null };
-  const signer = createSign('RSA-SHA256');
-  signer.update(pdf);
-  signer.end();
-  return {
-    sha256,
-    status: 'ASSINADO_DESTACADO',
-    algorithm: 'RSA-SHA256',
-    signatureBase64: signer.sign(configuredKey).toString('base64'),
-  };
+}> {
+  return signPades(pdf);
 }

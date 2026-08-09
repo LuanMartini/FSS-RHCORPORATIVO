@@ -28,6 +28,10 @@ Se tiver Docker instalado, suba um PostgreSQL local com:
 docker compose up -d
 ```
 
+Se a porta `5432` já estiver ocupada no computador, use outra porta local, por
+exemplo `RHCORP_POSTGRES_PORT=55432 docker compose up -d`, e configure o mesmo
+valor em `PG_PORT` no `backend/.env`.
+
 3. Aplique as migracoes e, apenas no primeiro ambiente de desenvolvimento,
 execute o seed explicitamente:
 
@@ -114,21 +118,28 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 O funil está em **Admissão digital** e a árvore com drag-and-drop em
 **Organograma**. O envio em lote usa uma requisição binária por arquivo para
 permitir progresso individual, retry isolado e limite de 10 MB.
+O OCR é local e usa o modelo de português do Tesseract; em produção,
+`OCR_PROVIDER=tesseract` é obrigatório e leituras com baixa confiança ficam
+marcadas para revisão humana. Consulte `docs/ocr-local.md` antes da ativação.
 
 ## Ponto e jornada avançados
 
 O menu **Ponto & Jornada** reúne o espelho mensal, banco de horas, marcação com
-GPS/geofence, captura facial simulada, escalas 12x36, 6x1, 5x2, rotativas e
+GPS/geofence, comparação facial local por embeddings, escalas 12x36, 6x1, 5x2, rotativas e
 flexíveis e solicitações de ajuste em dois níveis. O motor estritamente tipado
 está em `backend/src/jornada` e o schema particionado em
 `backend/src/db/migrations/003_jornada_avancada.sql`.
 
 Câmera e geolocalização exigem contexto seguro (`https`) fora de `localhost`.
-Antes do uso como REP-P em produção ainda é obrigatório integrar certificado
-ICP-Brasil para saídas PAdES/CAdES, implementar os leiautes fiscais AFD/AEJ e
-emitir/manter o Atestado Técnico e Termo de Responsabilidade. O código mantém
-essas fronteiras explícitas e não apresenta a biometria simulada como serviço
-biométrico certificado.
+O backend possui assinatura PAdES de PDFs e CMS/CAdES destacado nos comprovantes
+de ponto, com PFX A1 em produção e modo simulado apenas em desenvolvimento/teste.
+Os leiautes fiscais AFD/AEJ, Atestado Técnico e Termo de Responsabilidade continuam
+fora do escopo; também é obrigatória a homologação de certificado, cadeia, revogação
+e carimbo do tempo antes de qualquer uso regulatório. Consulte `docs/icp-brasil.md`.
+A comparação facial usa o modelo local FaceRes e falha
+fechado se o provedor não estiver configurado; ela não inclui detecção de prova de
+vida. Consulte `docs/biometria-facial.md` para as restrições, recadastro obrigatório
+e o procedimento de ativação.
 
 ## Deploy
 
@@ -151,11 +162,11 @@ contracheque idempotente e transacional.
 npm --prefix backend run worker
 ```
 
-Os PDFs sao criptografados em repouso e sempre recebem hash SHA-256. Configure
-`PAYROLL_SIGNING_PRIVATE_KEY` para produzir uma assinatura RSA-SHA256 destacada.
-Isso nao equivale a uma assinatura PAdES/ICP-Brasil: a integracao com certificado,
-carimbo do tempo e politica de assinatura deve ser feita antes do uso documental
-em producao.
+Os PDFs sao criptografados em repouso e sempre recebem hash SHA-256. Em produção,
+`ICP_BRASIL_MODE=producao` usa um certificado A1 `.pfx/.p12` para incorporar a
+assinatura PAdES no PDF; em desenvolvimento/teste o modo simulado é explicitamente
+marcado e não tem validade documental. Veja `docs/icp-brasil.md` para configurar
+segredos e realizar a homologação necessária.
 
 Os eventos S-1200 e S-1210 sao preparados em uma outbox idempotente, mas a
 transmissao ao ambiente nacional, validacao de leiaute, certificado A1/A3,
@@ -216,8 +227,10 @@ segunda vez.
 A migration `007_beneficios_reembolsos.sql` inclui limites tributários, carteiras,
 alocações, operações idempotentes, regras de alçada, solicitações, aprovações e
 transações de cartão. Comprovantes JPG, PNG ou PDF são validados por assinatura
-binária, criptografados com AES-256-GCM e processados por OCR determinístico
-simulado para extrair CNPJ, data, valor, fornecedor e categoria.
+binária, criptografados com AES-256-GCM e processados por OCR local real para
+extrair CNPJ, data, valor, fornecedor e categoria. O valor informado pelo
+colaborador é confrontado com o valor reconhecido; divergências bloqueiam o envio
+e baixa confiança exige revisão humana.
 
 Na conciliação, uma transação é bloqueada durante o vínculo e o valor precisa
 corresponder exatamente ao comprovante. Despesas até R$ 500 seguem para o gestor;

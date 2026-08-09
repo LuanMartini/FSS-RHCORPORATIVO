@@ -7,6 +7,7 @@ import { getEnv } from '../../config/env.js';
 import { all } from '../../db/client.js';
 import * as service from '../application/atsService.js';
 import * as repository from '../infrastructure/atsRepository.js';
+import { errorLogFields, logger } from '../../observability/logger.js';
 
 type Ack = (response: Record<string, unknown>) => void;
 type SocketUser = { id: number; name: string; email: string; color: string };
@@ -58,12 +59,12 @@ export function attachAtsSocketServer(server: HttpServer): Server {
   if (process.env.REDIS_URL) {
     const publisher=createClient({url:process.env.REDIS_URL});
     const subscriber=publisher.duplicate();
-    publisher.on('error',(error)=>console.error('Redis ATS publisher',error.message));
-    subscriber.on('error',(error)=>console.error('Redis ATS subscriber',error.message));
+    publisher.on('error',(error)=>logger.error({ event:'ats_redis_publisher_error', ...errorLogFields(error) },'Redis ATS publisher indisponivel'));
+    subscriber.on('error',(error)=>logger.error({ event:'ats_redis_subscriber_error', ...errorLogFields(error) },'Redis ATS subscriber indisponivel'));
     redisReady=false;
     void Promise.all([publisher.connect(),subscriber.connect()])
       .then(()=>{io?.adapter(createAdapter(publisher,subscriber));redisReady=true;redisError=null;})
-      .catch((error)=>{redisError=error instanceof Error?error.message:String(error);console.error('Falha no Redis adapter ATS:',redisError);});
+      .catch((error)=>{redisError=error instanceof Error?error.message:String(error);logger.error({ event:'ats_redis_adapter_failed', ...errorLogFields(error) },'Falha no Redis adapter ATS');});
   }
 
   io.use(async (socket,next) => {

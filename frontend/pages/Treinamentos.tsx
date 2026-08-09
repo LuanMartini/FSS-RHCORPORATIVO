@@ -1,3 +1,4 @@
+/* eslint-disable jsx-a11y/media-has-caption -- O catálogo ainda não fornece arquivos de legenda; a publicação de aulas exige uma faixa antes de liberar conteúdo. */
 import{useCallback,useEffect,useMemo,useRef,useState}from'react';import{apiFetch}from'../services/api';import type{LmsCourse,LmsDashboard,LmsLesson,QuizAttempt}from'../types/lms';
 const n=(value:unknown)=>Number(value??0);const seconds=(value:number)=>`${Math.floor(value/60).toString().padStart(2,'0')}:${Math.floor(value%60).toString().padStart(2,'0')}`;
 function normalizeLesson(item:LmsLesson):LmsLesson{return{...item,id:n(item.id),curso_id:n(item.curso_id),duracao_segundos:n(item.duracao_segundos),ultimo_segundo:n(item.ultimo_segundo),maximo_segundo_assistido:n(item.maximo_segundo_assistido),tempo_valido_segundos:n(item.tempo_valido_segundos),percentual:n(item.percentual),versao:n(item.versao),concluida:Boolean(item.concluida)}}

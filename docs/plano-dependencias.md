@@ -2,6 +2,30 @@
 
 Data da análise: 2026-07-16.
 
+## Atualização do estado corrente — 2026-08-09
+
+O histórico abaixo registra os spikes e as decisões de migração. No estado atual
+do repositório, `dotenv` 17.4.2, `bcryptjs` 3.0.3 e Express 5.2.1 já estão no
+manifesto e continuam cobertos pelos testes de compatibilidade de ambiente e de
+hash de senha. A recomendação de staging/canário para qualquer nova mudança de
+Express continua válida.
+
+Atualizações compatíveis aplicadas nesta revisão:
+
+| Dependência | Versão anterior | Versão validada |
+| --- | ---: | ---: |
+| express-rate-limit | 8.5.2 | 8.6.2 |
+| mammoth | 1.12.0 | 1.12.1 |
+| mysql2 | 3.23.0 | 3.23.2 |
+| pg | 8.22.0 | 8.23.0 |
+| redis | 6.1.0 | 6.2.0 |
+
+`npm audit fix --omit=dev` também atualizou dependências transitivas compatíveis
+e `npm --prefix backend audit --omit=dev --audit-level=high` retornou zero
+vulnerabilidades. A validação usou Postgres e Redis reais, executou migrations,
+seed e verificação do banco, e concluiu `RUN_DB_INTEGRATION=1 npm run check`
+com 101 testes de backend aprovados, sem skips, além dos 5 testes do frontend.
+
 ## Resumo executivo
 
 As atualizações foram separadas por risco e testadas em branches independentes,

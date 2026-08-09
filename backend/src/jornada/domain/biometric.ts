@@ -1,9 +1,23 @@
-import { createHash } from 'node:crypto';
+export const FACIAL_TEMPLATE_VERSION = 'LOCAL-HUMAN-WASM-FACERES-V1';
+export const FACIAL_EMBEDDING_DIMENSIONS = 1024;
+
+export interface FacialTemplate {
+  version: typeof FACIAL_TEMPLATE_VERSION;
+  dimensions: typeof FACIAL_EMBEDDING_DIMENSIONS;
+  embedding: number[];
+}
 
 export interface BiometricComparison {
   approved: boolean;
   confidence: number;
-  liveHash: string;
+  similarity: number;
+}
+
+export class InvalidFacialTemplateError extends Error {
+  constructor(message = 'Template facial invalido ou desatualizado.') {
+    super(message);
+    this.name = 'InvalidFacialTemplateError';
+  }
 }
 
 export function decodePhotoDataUrl(photoBase64: string): Buffer {
@@ -16,20 +30,49 @@ export function decodePhotoDataUrl(photoBase64: string): Buffer {
   return buffer;
 }
 
-export function biometricTemplate(photo: Buffer): string {
-  return createHash('sha256').update(photo).digest('hex');
+function normalizedEmbedding(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length !== FACIAL_EMBEDDING_DIMENSIONS
+      || !value.every((item) => typeof item === 'number' && Number.isFinite(item))) {
+    throw new InvalidFacialTemplateError();
+  }
+  const norm = Math.hypot(...value);
+  if (!Number.isFinite(norm) || norm === 0) throw new InvalidFacialTemplateError();
+  return value.map((item) => item / norm);
 }
 
-export function compareBiometric(profileHash: string, livePhoto: Buffer, threshold = 48): BiometricComparison {
-  const liveHash = biometricTemplate(livePhoto);
-  if (profileHash === liveHash) return { approved: true, confidence: 99.9, liveHash };
-  let equalBits = 0;
-  for (let index = 0; index < liveHash.length; index += 1) {
-    const left = Number.parseInt(profileHash[index] ?? '0', 16);
-    const right = Number.parseInt(liveHash[index] ?? '0', 16);
-    const differing = left ^ right;
-    equalBits += 4 - differing.toString(2).replaceAll('0', '').length;
+export function createFacialTemplate(embedding: number[]): FacialTemplate {
+  return {
+    version: FACIAL_TEMPLATE_VERSION,
+    dimensions: FACIAL_EMBEDDING_DIMENSIONS,
+    embedding: normalizedEmbedding(embedding),
+  };
+}
+
+export function parseFacialTemplate(value: unknown): FacialTemplate {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value) as unknown; }
+    catch { throw new InvalidFacialTemplateError(); }
   }
-  const confidence = Math.round((equalBits / 256) * 10_000) / 100;
-  return { approved: confidence >= threshold, confidence, liveHash };
+  if (!parsed || typeof parsed !== 'object') throw new InvalidFacialTemplateError();
+  const record = parsed as Record<string, unknown>;
+  if (record.version !== FACIAL_TEMPLATE_VERSION || record.dimensions !== FACIAL_EMBEDDING_DIMENSIONS) {
+    throw new InvalidFacialTemplateError();
+  }
+  return {
+    version: FACIAL_TEMPLATE_VERSION,
+    dimensions: FACIAL_EMBEDDING_DIMENSIONS,
+    embedding: normalizedEmbedding(record.embedding),
+  };
+}
+
+export function compareBiometric(profileTemplate: unknown, liveEmbedding: number[], threshold: number): BiometricComparison {
+  if (!Number.isFinite(threshold) || threshold < 0.5 || threshold >= 1) {
+    throw new Error('Limiar de reconhecimento facial deve estar entre 0.50 e 0.99.');
+  }
+  const reference = parseFacialTemplate(profileTemplate).embedding;
+  const live = normalizedEmbedding(liveEmbedding);
+  const similarity = Math.max(-1, Math.min(1, reference.reduce((total, value, index) => total + value * (live[index] ?? 0), 0)));
+  const confidence = Math.round(Math.max(0, similarity) * 10_000) / 100;
+  return { approved: similarity >= threshold, confidence, similarity };
 }

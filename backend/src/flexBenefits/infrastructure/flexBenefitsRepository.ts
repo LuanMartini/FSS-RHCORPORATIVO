@@ -72,7 +72,7 @@ export async function approvalRules():Promise<{minimumCents:number;maximumCents:
   return rows.map((row)=>({minimumCents:Number(row.valor_minimo_centavos),maximumCents:row.valor_maximo_centavos===null?null:Number(row.valor_maximo_centavos),levels:Array.isArray(row.niveis)?row.niveis.map(String):[]}));
 }
 
-export async function createReimbursement(input:{collaboratorId:number;transactionId:number|null;category:string;description:string;amountCents:number;ocr:ReceiptOcr;storageKey:string;sha256:string;mime:string;filename:string;idempotencyKey:string;levels:string[]}):Promise<Row>{
+export async function createReimbursement(input:{collaboratorId:number;transactionId:number|null;category:string;description:string;amountCents:number;expenseDate:string;ocr:ReceiptOcr&Record<string,unknown>;storageKey:string;sha256:string;mime:string;filename:string;idempotencyKey:string;levels:string[]}):Promise<Row>{
   return withTransaction(async(tx)=>{
     const duplicate=await tx.all(`SELECT * FROM reembolsos_solicitacoes WHERE chave_idempotencia=?::uuid`,[input.idempotencyKey]) as Row[];
     if(duplicate[0])return {...duplicate[0],_idempotent_reuse:true} as Row;
@@ -89,7 +89,7 @@ export async function createReimbursement(input:{collaboratorId:number;transacti
       (colaborador_id,transacao_cartao_id,categoria,descricao,valor_solicitado_centavos,data_despesa,cnpj_fornecedor,
        comprovante_storage_key,comprovante_sha256,comprovante_mime,comprovante_nome,ocr_resultado,ocr_confianca,
        status,total_niveis,chave_idempotencia)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::uuid) RETURNING *`,[input.collaboratorId,input.transactionId,input.category,input.description,input.amountCents,input.ocr.date,input.ocr.cnpj,input.storageKey,input.sha256,input.mime,input.filename,JSON.stringify(input.ocr),input.ocr.confidence,status,input.levels.length,input.idempotencyKey]) as Row[];
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::uuid) RETURNING *`,[input.collaboratorId,input.transactionId,input.category,input.description,input.amountCents,input.expenseDate,input.ocr.cnpj,input.storageKey,input.sha256,input.mime,input.filename,JSON.stringify(input.ocr),input.ocr.confidence,status,input.levels.length,input.idempotencyKey]) as Row[];
     const reimbursement=rows[0] as Row;
     for(let index=0;index<input.levels.length;index++)await tx.run(`INSERT INTO reembolsos_aprovacoes
       (reembolso_id,nivel,papel,aprovador_colaborador_id) VALUES (?,?,?,CASE WHEN ?='GESTOR' THEN (SELECT gestor_id FROM colaboradores WHERE id=?) ELSE NULL END)`,[reimbursement.id,index+1,input.levels[index],input.levels[index],input.collaboratorId]);

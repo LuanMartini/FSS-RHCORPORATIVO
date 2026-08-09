@@ -1,5 +1,6 @@
 import pg from 'pg';
 import mysql from 'mysql2/promise';
+import { errorLogFields, logger } from '../observability/logger.js';
 
 const dialect = (process.env.DB_CLIENT || 'postgres').toLowerCase();
 export const isMysql = dialect === 'mysql' || dialect === 'mysql2';
@@ -128,7 +129,7 @@ export async function withTransaction(work, options = {}) {
       if (isMysql) await connection.rollback();
       else await connection.query('ROLLBACK');
     } catch (rollbackError) {
-      console.error('Falha ao executar rollback', rollbackError);
+      logger.error({ event: 'database_rollback_failed', ...errorLogFields(rollbackError) }, 'Falha ao executar rollback');
     }
     throw error;
   } finally {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {resolveApprovalLevels,simulateReceiptOcr,validateAllocation,validateReceiptFile} from '../src/flexBenefits/domain/flexBenefitsEngine.js';
+import {resolveApprovalLevels,validateAllocation,validateReceiptFile} from '../src/flexBenefits/domain/flexBenefitsEngine.js';
 import type {BenefitLimit} from '../src/flexBenefits/domain/types.js';
 
 const limits:BenefitLimit[]=[
@@ -29,11 +29,9 @@ test('impede gasto duplo e violacao de limite tributario parametrizado',()=>{
   ]),/VALE_REFEICAO/);
 });
 
-test('OCR simulado extrai CNPJ, data, valor e categoria sem confundir a data com valor',()=>{
+test('valida assinatura do comprovante antes de enviar para OCR',()=>{
   const buffer=Buffer.from([0xff,0xd8,0xff,0x01,0x02]);
   validateReceiptFile(buffer,'image/jpeg',buffer.length);
-  const result=simulateReceiptOcr(buffer,'Uber_12345678000190_2026-07-14_32-40.jpg');
-  assert.equal(result.cnpj,'12345678000190');assert.equal(result.date,'2026-07-14');assert.equal(result.amountCents,3240);assert.equal(result.category,'MOBILIDADE');assert.ok(result.confidence>=90);
   assert.throws(()=>validateReceiptFile(Buffer.from('arquivo'),'image/png',7),/assinatura/i);
 });
 

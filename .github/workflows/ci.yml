@@ -99,6 +99,25 @@ jobs:
       - name: Lint, typecheck, tests and build
         run: npm run check
 
+      - name: Backend coverage and quality gate
+        run: npm run test:coverage
+        working-directory: backend
+
+      - name: Frontend coverage and quality gate
+        run: npm run test:coverage
+        working-directory: frontend
+
+      - name: Preserve coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            backend/coverage
+            frontend/coverage
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Dependency audit
         run: |
           npm audit --omit=dev --audit-level=high

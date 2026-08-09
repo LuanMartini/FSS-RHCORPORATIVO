@@ -1,4 +1,5 @@
 import { all, run } from '../../db/client.js';
+import type { FacialTemplate } from '../domain/biometric.ts';
 import type { MirrorPunch, PunchType, ScheduleConfig, ScheduleType, WorkSchedule } from '../domain/types.ts';
 
 export interface DatabaseClient {
@@ -73,7 +74,7 @@ export async function getCollaboratorContext(id: number, client: DatabaseClient 
             f.nome AS filial_nome, f.codigo AS filial_codigo, f.timezone AS filial_timezone,
             f.latitude AS filial_latitude, f.longitude AS filial_longitude,
             f.geofence_tipo, f.raio_metros, f.poligono, f.tolerancia_gps_metros,
-            bf.template_hash, bf.foto_storage_key AS biometria_storage_key,
+            bf.template_embedding, bf.template_version, bf.foto_storage_key AS biometria_storage_key,
             e.id AS escala_id, e.nome AS escala_nome, e.tipo AS escala_tipo,
             e.timezone AS escala_timezone, e.inicio_vigencia,
             ce.inicio AS atribuicao_inicio, ce.ciclo_offset,
@@ -160,7 +161,7 @@ export async function getInitialBankBalance(collaboratorId: number, start: strin
 }
 
 export async function enrollBiometric(input: {
-  collaboratorId: number; templateHash: string; storageKey: string; consentIp: string | null;
+  collaboratorId: number; template: FacialTemplate; algorithm: string; storageKey: string; consentIp: string | null;
 }, client: DatabaseClient): Promise<string | null> {
   const previous = await client.all<{ foto_storage_key: string }>(
     'SELECT foto_storage_key FROM biometrias_faciais WHERE colaborador_id = ? FOR UPDATE',
@@ -168,24 +169,26 @@ export async function enrollBiometric(input: {
   );
   await client.run(
     `INSERT INTO biometrias_faciais
-      (colaborador_id, template_hash, foto_storage_key, consentimento_em, consentimento_ip)
-     VALUES (?, ?, ?, NOW(), ?)
+      (colaborador_id, template_hash, template_embedding, template_version, algoritmo, foto_storage_key, consentimento_em, consentimento_ip)
+     VALUES (?, NULL, ?::jsonb, ?, ?, ?, NOW(), ?)
      ON CONFLICT (colaborador_id) DO UPDATE SET
-       template_hash = EXCLUDED.template_hash, foto_storage_key = EXCLUDED.foto_storage_key,
+       template_hash = NULL, template_embedding = EXCLUDED.template_embedding,
+       template_version = EXCLUDED.template_version, algoritmo = EXCLUDED.algoritmo,
+       foto_storage_key = EXCLUDED.foto_storage_key,
        consentimento_em = NOW(), consentimento_ip = EXCLUDED.consentimento_ip,
        versao = biometrias_faciais.versao + 1, ativo = TRUE, updated_at = NOW()`,
-    [input.collaboratorId, input.templateHash, input.storageKey, input.consentIp]
+    [input.collaboratorId, JSON.stringify(input.template), input.template.version, input.algorithm, input.storageKey, input.consentIp]
   );
   await client.run(
     `INSERT INTO consentimentos_dados
       (colaborador_id,finalidade_codigo,politica_versao,concedido,ip,metadados)
-     VALUES (?,'BIOMETRIA_PONTO','BIOMETRIA_V1',true,?::inet,'{"origem":"cadastro_ponto"}'::jsonb)`,
+     VALUES (?,'BIOMETRIA_PONTO','BIOMETRIA_V2',true,?::inet,'{"origem":"cadastro_ponto","provedor":"local"}'::jsonb)`,
     [input.collaboratorId,input.consentIp],
   );
   return previous[0]?.foto_storage_key ?? null;
 }
 
-export async function findIdempotentPoint(key: string, client: DatabaseClient): Promise<Record<string, unknown> | null> {
+export async function findIdempotentPoint(key: string, client: DatabaseClient = defaultClient): Promise<Record<string, unknown> | null> {
   const rows = await client.all<Record<string, unknown>>(
     `SELECT p.* FROM pontos_idempotencia i
        JOIN pontos_registrados p ON p.nsr = i.nsr AND p.registrado_em = i.registrado_em

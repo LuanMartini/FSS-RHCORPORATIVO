@@ -86,47 +86,59 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
     }
   }
 
-  if (loading) return <p className="text-slate-500">Carregando...</p>;
+  if (loading) return <p role="status" className="text-slate-500">Carregando...</p>;
 
   return (
     <div className="space-y-8 max-w-4xl">
       <h2 className="font-serif text-2xl text-[#0f2340]">Férias</h2>
-      {erro && <p className="text-red-600 text-sm">{erro}</p>}
+      {erro && <p role="alert" aria-live="assertive" className="text-red-700 text-sm">{erro}</p>}
 
       <form onSubmit={solicitar} className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
         <h3 className="font-semibold text-slate-800">Nova solicitação</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+          <label htmlFor="ferias-funcionario" className="mb-1 block text-xs font-semibold text-slate-600">Funcionário</label>
           <select
+            id="ferias-funcionario"
             required
             value={form.funcionarioId}
             onChange={e => setForm({ ...form, funcionarioId: e.target.value })}
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
           >
-            <option value="">Funcionário</option>
+            <option value="">Selecione</option>
             {ativos.map(f => (
               <option key={f.id} value={f.id}>{f.nome}</option>
             ))}
-          </select>
+          </select></div>
+          <div>
+          <label htmlFor="ferias-inicio" className="mb-1 block text-xs font-semibold text-slate-600">Início</label>
           <input
+            id="ferias-inicio"
             type="date"
             required
             value={form.dataInicio}
             onChange={e => setForm({ ...form, dataInicio: e.target.value })}
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-          />
+          /></div>
+          <div>
+          <label htmlFor="ferias-fim" className="mb-1 block text-xs font-semibold text-slate-600">Fim</label>
           <input
+            id="ferias-fim"
             type="date"
             required
             value={form.dataFim}
             onChange={e => setForm({ ...form, dataFim: e.target.value })}
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-          />
+          /></div>
+          <div className="md:col-span-2">
+          <label htmlFor="ferias-observacao" className="mb-1 block text-xs font-semibold text-slate-600">Observação (opcional)</label>
           <input
+            id="ferias-observacao"
             placeholder="Observação (opcional)"
             value={form.observacao}
             onChange={e => setForm({ ...form, observacao: e.target.value })}
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm md:col-span-2"
-          />
+            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          /></div>
         </div>
         <button type="submit" className="px-4 py-2 bg-[#0f2340] text-white rounded-lg text-sm font-semibold">
           Enviar solicitação
@@ -135,13 +147,14 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
 
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
+          <caption className="sr-only">Solicitações de férias</caption>
           <thead className="bg-slate-50">
             <tr>
-              <th className="text-left px-4 py-2">Funcionário</th>
-              <th className="text-left px-4 py-2">Início</th>
-              <th className="text-left px-4 py-2">Fim</th>
-              <th className="text-left px-4 py-2">Status</th>
-              <th className="text-left px-4 py-2">Ações</th>
+              <th scope="col" className="text-left px-4 py-2">Funcionário</th>
+              <th scope="col" className="text-left px-4 py-2">Início</th>
+              <th scope="col" className="text-left px-4 py-2">Fim</th>
+              <th scope="col" className="text-left px-4 py-2">Status</th>
+              <th scope="col" className="text-left px-4 py-2">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -187,7 +200,7 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
             ))}
           </tbody>
         </table>
-        {lista.length === 0 && <p className="p-6 text-slate-500 text-center">Nenhuma solicitação.</p>}
+        {lista.length === 0 && <p role="status" className="p-6 text-slate-500 text-center">Nenhuma solicitação.</p>}
       </div>
     </div>
   );

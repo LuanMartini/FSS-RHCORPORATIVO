@@ -278,7 +278,7 @@ export async function seedIfEmpty() {
   await ensureCargo('Gerente de TI', ti, 12000.0);
   await ensureCargo('Analista Financeiro', fin, 6100.0);
 
-  if ((await countTable('funcionarios')) === 0) {
+  if (!isMysql && (await countTable('colaboradores')) === 0) {
     const cargos = await all(
       `SELECT c.id, c.nome, c.departamento_id, c.salario_base
        FROM cargos c ORDER BY c.id`
@@ -289,11 +289,11 @@ export async function seedIfEmpty() {
     const clara = porNome('Analista Financeiro');
 
     await run(
-      `INSERT INTO funcionarios
-       (nome, cpf, email, cargo_id, departamento_id, salario, telefone, data_nascimento, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ATIVO'),
-              (?, ?, ?, ?, ?, ?, ?, ?, 'ATIVO'),
-              (?, ?, ?, ?, ?, ?, ?, ?, 'FERIAS')`,
+      `INSERT INTO colaboradores
+       (nome_completo, cpf, email, cargo_id, departamento_id, salario, telefone, data_nascimento, data_admissao, status, etapa_admissao)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'ATIVO', 'CONCLUIDA'),
+              (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'ATIVO', 'CONCLUIDA'),
+              (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'AFASTADO', 'CONCLUIDA')`,
       [
         'Amanda Souza',
         '12345678901',
@@ -324,19 +324,6 @@ export async function seedIfEmpty() {
   }
 
   if (!isMysql) {
-    await run(
-      `INSERT INTO colaboradores
-       (nome_completo, cpf, email, telefone, data_nascimento, cargo_id, departamento_id, salario, data_admissao, status, etapa_admissao)
-       SELECT f.nome, f.cpf, f.email, f.telefone, f.data_nascimento, f.cargo_id, f.departamento_id, f.salario,
-              CURRENT_DATE, CASE WHEN f.status = 'ATIVO' THEN 'ATIVO' ELSE 'AFASTADO' END, 'CONCLUIDA'
-       FROM funcionarios f
-       ON CONFLICT (cpf) DO NOTHING`
-    );
-    await run(
-      `INSERT INTO funcionarios_colaboradores (funcionario_id,colaborador_id)
-       SELECT f.id,c.id FROM funcionarios f JOIN colaboradores c ON c.cpf=f.cpf
-       ON CONFLICT DO NOTHING`
-    );
     await run(
       `INSERT INTO carteira_colaborador (colaborador_id,competencia,saldo_total_centavos,saldo_alocado_centavos)
        SELECT c.id,date_trunc('month',current_date)::date,120000,0 FROM colaboradores c WHERE c.status<>'DESLIGADO'

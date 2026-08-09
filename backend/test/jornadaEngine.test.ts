@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compareBiometric, biometricTemplate } from '../src/jornada/domain/biometric.ts';
+import { readFile } from 'node:fs/promises';
+import { compareBiometric, createFacialTemplate } from '../src/jornada/domain/biometric.ts';
 import { validateGeofence } from '../src/jornada/domain/geofence.ts';
 import { calculateMonthlyMirror } from '../src/jornada/domain/journeyEngine.ts';
+import { FacialRecognitionError, generateFacialEmbedding } from '../src/jornada/infrastructure/localFaceEmbeddingProvider.ts';
 import type { MirrorPunch, WorkSchedule } from '../src/jornada/domain/types.ts';
 
 function schedule(overrides: Partial<WorkSchedule> = {}): WorkSchedule {
@@ -76,9 +78,50 @@ test('escala 12x36 alterna trabalho e folga e marca ausencia somente no plantao'
   assert.equal(mirror.days[1]?.expectedMinutes, 0);
 });
 
-test('biometria simulada aprova template identico com alta confianca', () => {
-  const photo = Buffer.alloc(2_000, 7);
-  const comparison = compareBiometric(biometricTemplate(photo), photo);
-  assert.equal(comparison.approved, true);
-  assert.equal(comparison.confidence, 99.9);
+async function fixture(name: string): Promise<Buffer> {
+  return await readFile(new URL(`./fixtures/faces/${name}`, import.meta.url));
+}
+
+async function withLocalFacialProvider<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.FACIAL_MATCH_PROVIDER;
+  process.env.FACIAL_MATCH_PROVIDER = 'local';
+  try { return await work(); }
+  finally {
+    if (previous == null) delete process.env.FACIAL_MATCH_PROVIDER;
+    else process.env.FACIAL_MATCH_PROVIDER = previous;
+  }
+}
+
+test('embeddings reais aprovam a mesma pessoa sintética sob captura diferente e recusam pessoa distinta', async () => {
+  await withLocalFacialProvider(async () => {
+    const [reference, samePerson, differentPerson] = await Promise.all([
+      fixture('synthetic-person-a-reference.png'),
+      fixture('synthetic-person-a-variant.png'),
+      fixture('synthetic-person-b-reference.png'),
+    ]);
+    const referenceEmbedding = await generateFacialEmbedding(reference);
+    const sameEmbedding = await generateFacialEmbedding(samePerson);
+    const differentEmbedding = await generateFacialEmbedding(differentPerson);
+    const template = createFacialTemplate(referenceEmbedding);
+    const same = compareBiometric(template, sameEmbedding, 0.82);
+    const different = compareBiometric(template, differentEmbedding, 0.82);
+    assert.equal(same.approved, true);
+    assert.ok(same.confidence >= 82);
+    assert.equal(different.approved, false);
+    assert.ok(different.confidence < 82);
+  });
+});
+
+test('provedor facial ausente falha fechado antes de processar a marcacao', async () => {
+  const previous = process.env.FACIAL_MATCH_PROVIDER;
+  delete process.env.FACIAL_MATCH_PROVIDER;
+  try {
+    await assert.rejects(
+      () => generateFacialEmbedding(Buffer.alloc(2_000, 0)),
+      (error: unknown) => error instanceof FacialRecognitionError && error.code === 'FACIAL_PROVIDER_UNAVAILABLE',
+    );
+  } finally {
+    if (previous == null) delete process.env.FACIAL_MATCH_PROVIDER;
+    else process.env.FACIAL_MATCH_PROVIDER = previous;
+  }
 });

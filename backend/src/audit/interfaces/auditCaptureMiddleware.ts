@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { sha256, stableSerialize } from '../domain/auditEngine.js';
 import type { JsonValue } from '../domain/types.js';
 import { enqueueAuditOutbox } from '../infrastructure/auditRepository.js';
+import { errorLogFields, logger } from '../../observability/logger.js';
 
 type AuthenticatedRequest = Request & { user?: { sub?: string | number; email?: string };correlationId?:string };
 type Match = { action: string; resourceType: string; resourceId: string | null;classification:string };
@@ -60,7 +61,7 @@ export function auditCaptureMiddleware(req: AuthenticatedRequest, res: Response,
         classification:matched.classification,purpose:String(req.get('x-processing-purpose')??'OPERACAO_RH').slice(0,80),
         correlationId:req.correlationId??null,
         requestBodyHash: body === null ? null : sha256(stableSerialize(body)) },
-    }).catch((error) => console.error('Falha critica ao enfileirar auditoria de leitura', error));
+    }).catch((error) => logger.error({ event: 'audit_outbox_enqueue_failed', requestId: req.correlationId, ...errorLogFields(error) }, 'Falha ao enfileirar auditoria'));
   });
   next();
 }

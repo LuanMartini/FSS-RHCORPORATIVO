@@ -122,8 +122,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
 
       <form onSubmit={handleSubmit} className="space-y-4 bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Nome completo</label>
+          <label htmlFor="admitir-nome" className="block text-xs font-semibold text-slate-500 mb-1">Nome completo</label>
           <input
+            id="admitir-nome"
             name="nome"
             required
             value={form.nome}
@@ -132,8 +133,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">CPF (somente números)</label>
+          <label htmlFor="admitir-cpf" className="block text-xs font-semibold text-slate-500 mb-1">CPF (somente números)</label>
           <input
+            id="admitir-cpf"
             name="cpf"
             required
             value={form.cpf}
@@ -142,8 +144,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">E-mail</label>
+          <label htmlFor="admitir-email" className="block text-xs font-semibold text-slate-500 mb-1">E-mail</label>
           <input
+            id="admitir-email"
             name="email"
             type="email"
             required
@@ -153,8 +156,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Cargo</label>
+          <label htmlFor="admitir-cargo" className="block text-xs font-semibold text-slate-500 mb-1">Cargo</label>
           <select
+            id="admitir-cargo"
             name="cargoId"
             required
             value={form.cargoId}
@@ -168,8 +172,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Departamento</label>
+          <label htmlFor="admitir-departamento" className="block text-xs font-semibold text-slate-500 mb-1">Departamento</label>
           <select
+            id="admitir-departamento"
             name="departamentoId"
             value={form.departamentoId}
             onChange={handleChange}
@@ -182,8 +187,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Salário</label>
+          <label htmlFor="admitir-salario" className="block text-xs font-semibold text-slate-500 mb-1">Salário</label>
           <input
+            id="admitir-salario"
             name="salario"
             type="number"
             min={0}
@@ -195,8 +201,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Telefone (opcional)</label>
+          <label htmlFor="admitir-telefone" className="block text-xs font-semibold text-slate-500 mb-1">Telefone (opcional)</label>
           <input
+            id="admitir-telefone"
             name="telefone"
             value={form.telefone}
             onChange={handleChange}
@@ -204,8 +211,9 @@ export default function AdmitirFuncionario({ onSuccess }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Data de nascimento (opcional)</label>
+          <label htmlFor="admitir-nascimento" className="block text-xs font-semibold text-slate-500 mb-1">Data de nascimento (opcional)</label>
           <input
+            id="admitir-nascimento"
             name="dataNascimento"
             type="date"
             value={form.dataNascimento}

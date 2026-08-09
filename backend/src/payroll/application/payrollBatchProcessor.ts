@@ -5,11 +5,11 @@ import type { FlexibleDeduction, VariableEarning } from '../domain/types.js';
 import { generatePayslipPdf, signPayslip } from '../infrastructure/payslipDocument.js';
 import * as repository from '../infrastructure/payrollRepository.js';
 
-function cents(value: unknown): bigint {
+export function cents(value: unknown): bigint {
   return BigInt(String(value ?? 0));
 }
 
-function benefitValue(row: Record<string, unknown>, salary: bigint): bigint {
+export function benefitValue(row: Record<string, unknown>, salary: bigint): bigint {
   if (row.valor_funcionario_centavos != null) return cents(row.valor_funcionario_centavos);
   if (row.percentual_funcionario_milionesimos != null) return multiplyRatio(salary, cents(row.percentual_funcionario_milionesimos), 1_000_000n);
   if (row.percentual_salario_milionesimos != null) return multiplyRatio(salary, cents(row.percentual_salario_milionesimos), 1_000_000n);
@@ -64,8 +64,8 @@ export async function processPayrollJob(job: Record<string, unknown>): Promise<v
         flexibleDeductions,
       });
       const pdf = generatePayslipPdf(employee, competency, result);
-      const signature = signPayslip(pdf);
-      storageKey = await saveEncrypted(pdf);
+      const signature = await signPayslip(pdf);
+      storageKey = await saveEncrypted(signature.document);
       const persisted = await repository.persistPayslip({
         folhaId, employee, result, inssTableId, irrfTableId, pdfStorageKey: storageKey,
         pdfSha256: signature.sha256, signatureStatus: signature.status,

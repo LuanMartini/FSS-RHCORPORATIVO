@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/jornada/**/*.ts", "src/payroll/**/*.ts", "src/ats/**/*.ts", "src/performance/**/*.ts", "src/flexBenefits/**/*.ts", "src/lms/**/*.ts", "src/climate/**/*.ts", "src/audit/**/*.ts", "test/jornada*.test.ts", "test/payroll*.test.ts", "test/ats*.test.ts", "test/performance*.test.ts", "test/flexBenefits*.test.ts", "test/lms*.test.ts", "test/climate*.test.ts", "test/audit*.test.ts"]
+  "include": ["src/core/**/*.ts", "src/security/**/*.ts", "src/jornada/**/*.ts", "src/payroll/**/*.ts", "src/ats/**/*.ts", "src/performance/**/*.ts", "src/flexBenefits/**/*.ts", "src/lms/**/*.ts", "src/climate/**/*.ts", "src/audit/**/*.ts", "test/ocr*.test.ts", "test/icp*.test.ts", "test/observability*.test.ts", "test/jornada*.test.ts", "test/payroll*.test.ts", "test/ats*.test.ts", "test/performance*.test.ts", "test/flexBenefits*.test.ts", "test/lms*.test.ts", "test/climate*.test.ts", "test/audit*.test.ts"]
 }

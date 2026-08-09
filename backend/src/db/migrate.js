@@ -4,6 +4,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { getPool, isMysql } from './client.js';
 import { ensureBaseSchema } from './schema.js';
+import { initializeErrorTracking, installProcessErrorHandlers, reportError } from '../observability/errorTracking.js';
+import { errorLogFields, logger } from '../observability/logger.js';
 
 const MIGRATION_LOCK = 671202608;
 const directory = new URL('./migrations/', import.meta.url);
@@ -71,13 +73,16 @@ export async function assertSchemaCurrent() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  initializeErrorTracking();
+  installProcessErrorHandlers();
   migrate()
     .then(async (result) => {
-      console.log(result.applied.length ? `Migracoes aplicadas: ${result.applied.join(', ')}` : 'Banco ja esta atualizado.');
+      logger.info({ event: 'database_migrated', applied: result.applied }, result.applied.length ? 'Migracoes aplicadas' : 'Banco ja esta atualizado');
       (await getPool()).end();
     })
     .catch(async (error) => {
-      console.error(error);
+      logger.fatal({ event: 'database_migration_failed', ...errorLogFields(error) }, 'Falha na migracao do banco');
+      reportError(error, { source: 'database_migration' });
       try { (await getPool()).end(); } catch {}
       process.exitCode = 1;
     });

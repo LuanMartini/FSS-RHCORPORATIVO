@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { withTransaction } from '../../db/client.js';
 import { AppError } from '../../core/domain/errors.js';
 import { removeEncrypted, saveEncrypted } from '../../core/infrastructure/encryptedFileStorage.js';
-import { biometricTemplate, compareBiometric, decodePhotoDataUrl } from '../domain/biometric.ts';
+import { compareBiometric, createFacialTemplate, decodePhotoDataUrl, InvalidFacialTemplateError } from '../domain/biometric.ts';
 import { validateGeofence } from '../domain/geofence.ts';
 import { calculateMonthlyMirror } from '../domain/journeyEngine.ts';
+import { facialAlgorithm, facialMatchThreshold, FacialRecognitionError, generateFacialEmbedding } from '../infrastructure/localFaceEmbeddingProvider.ts';
+import { IcpBrasilSigningError, signCades } from '../../security/icpBrasilSigner.ts';
 import { PUNCH_TYPES, type Geofence, type PunchType } from '../domain/types.ts';
 import * as repository from '../infrastructure/journeyRepository.ts';
 import type { DatabaseClient } from '../infrastructure/journeyRepository.ts';
@@ -85,7 +87,7 @@ export async function getConfiguration(collaboratorIdValue: unknown): Promise<Re
   return {
     collaborator: {
       id: Number(context.id), name: context.nome_completo,
-      biometricEnrolled: Boolean(context.template_hash),
+      biometricEnrolled: Boolean(context.template_embedding),
       managerId: context.gestor_id == null ? null : Number(context.gestor_id),
     },
     branch: {
@@ -119,19 +121,23 @@ export async function enrollBiometric(input: {
   let storageKey: string | undefined;
   let previousKey: string | null = null;
   try {
+    const template = createFacialTemplate(await generateFacialEmbedding(photo));
     storageKey = await saveEncrypted(photo);
     previousKey = await withTransaction(async (rawClient: unknown) => {
       const client = asClient(rawClient);
       const collaborator = await repository.getCollaboratorContext(collaboratorId, client);
       if (!collaborator) throw new AppError('Colaborador nao encontrado.', 404, 'NOT_FOUND');
       return repository.enrollBiometric({
-        collaboratorId, templateHash: biometricTemplate(photo), storageKey: storageKey!, consentIp: input.ipAddress,
+        collaboratorId, template, algorithm: facialAlgorithm, storageKey: storageKey!, consentIp: input.ipAddress,
       }, client);
     });
     if (previousKey) await removeEncrypted(previousKey);
-    return { enrolled: true, algorithm: 'SIMULATED-HASH-V1' };
+    return { enrolled: true, algorithm: facialAlgorithm };
   } catch (error) {
     if (storageKey) await removeEncrypted(storageKey);
+    if (error instanceof FacialRecognitionError) {
+      throw new AppError(error.message, error.code === 'FACIAL_PROVIDER_UNAVAILABLE' ? 503 : 422, error.code);
+    }
     throw error;
   }
 }
@@ -159,16 +165,19 @@ export async function registerPoint(input: {
   let photoStorageKey: string | undefined;
 
   try {
+    const existing = await repository.findIdempotentPoint(idempotencyKey);
+    if (existing) return { ...existing, duplicate: true };
+    const liveEmbedding = await generateFacialEmbedding(livePhoto);
     return await withTransaction(async (rawClient: unknown) => {
       const client = asClient(rawClient);
       const duplicate = await repository.findIdempotentPoint(idempotencyKey, client);
       if (duplicate) return { ...duplicate, duplicate: true };
       const context = await repository.getCollaboratorContext(collaboratorId, client);
       if (!context) throw new AppError('Colaborador ou filial nao encontrada.', 404, 'NOT_FOUND');
-      if (!context.template_hash) throw new AppError('Biometria facial ainda nao cadastrada.', 409, 'BIOMETRIC_NOT_ENROLLED');
+      if (!context.template_embedding) throw new AppError('Biometria facial precisa ser recadastrada.', 409, 'BIOMETRIC_REENROLLMENT_REQUIRED');
       const geofence = validateGeofence({ latitude, longitude, accuracyMeters }, contextGeofence(context));
       if (!geofence.allowed) throw detailedError(geofence.reason ?? 'Fora da area permitida.', 422, 'OUTSIDE_GEOFENCE', { distanceMeters: geofence.distanceMeters });
-      const biometric = compareBiometric(String(context.template_hash), livePhoto);
+      const biometric = compareBiometric(context.template_embedding, liveEmbedding, facialMatchThreshold());
       if (!biometric.approved) throw detailedError('Correspondencia facial abaixo do limiar de seguranca.', 422, 'BIOMETRIC_MISMATCH', { confidence: biometric.confidence });
       photoStorageKey = await saveEncrypted(livePhoto);
       const sequence = await repository.preparePointSequence(registeredAt, client);
@@ -179,7 +188,14 @@ export async function registerPoint(input: {
         relogio: 'SERVER_UTC_NTP_REQUIRED', hashAnterior: sequence.previousHash,
       };
       const recordHash = createHash('sha256').update(JSON.stringify(receiptBase)).digest('hex');
-      const receipt = { ...receiptBase, hashSha256: recordHash, assinaturaPades: 'PENDENTE_INTEGRACAO_ICP_BRASIL' };
+      const signature = await signCades(Buffer.from(JSON.stringify(receiptBase), 'utf8'));
+      const receipt = {
+        ...receiptBase,
+        hashSha256: recordHash,
+        assinaturaCades: signature.signatureBase64,
+        assinaturaStatus: signature.status,
+        assinaturaAlgoritmo: signature.algorithm,
+      };
       const point = await repository.insertPoint({
         nsr: sequence.nsr, collaboratorId, filialId: Number(context.filial_id), type,
         registeredAt, capturedAt, timezone: String(context.filial_timezone), latitude, longitude,
@@ -197,6 +213,15 @@ export async function registerPoint(input: {
     }, { isolationLevel: 'SERIALIZABLE' });
   } catch (error) {
     if (photoStorageKey) await removeEncrypted(photoStorageKey);
+    if (error instanceof FacialRecognitionError) {
+      throw new AppError(error.message, error.code === 'FACIAL_PROVIDER_UNAVAILABLE' ? 503 : 422, error.code);
+    }
+    if (error instanceof InvalidFacialTemplateError) {
+      throw new AppError('Biometria facial precisa ser recadastrada.', 409, 'BIOMETRIC_REENROLLMENT_REQUIRED');
+    }
+    if (error instanceof IcpBrasilSigningError) {
+      throw new AppError(error.message, 503, error.code);
+    }
     throw error;
   }
 }
