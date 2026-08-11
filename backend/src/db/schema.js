@@ -290,10 +290,11 @@ export async function seedIfEmpty() {
 
     await run(
       `INSERT INTO colaboradores
-       (nome_completo, cpf, email, cargo_id, departamento_id, salario, telefone, data_nascimento, data_admissao, status, etapa_admissao)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'ATIVO', 'CONCLUIDA'),
-              (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'ATIVO', 'CONCLUIDA'),
-              (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'AFASTADO', 'CONCLUIDA')`,
+       (nome_completo, cpf, email, cargo_id, departamento_id, salario, telefone,
+        data_nascimento, data_admissao, status, etapa_admissao, lifecycle_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'ATIVO', 'CONCLUIDA', 'ATIVO'),
+              (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'ATIVO', 'CONCLUIDA', 'ATIVO'),
+              (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE, 'AFASTADO', 'CONCLUIDA', 'AFASTADO')`,
       [
         'Amanda Souza',
         '12345678901',
@@ -324,6 +325,37 @@ export async function seedIfEmpty() {
   }
 
   if (!isMysql) {
+    await run(
+      `INSERT INTO colaboradores
+       (nome_completo, cpf, email, telefone, data_nascimento, cargo_id, departamento_id, salario, data_admissao, status, etapa_admissao)
+       SELECT f.nome, f.cpf, f.email, f.telefone, f.data_nascimento, f.cargo_id, f.departamento_id, f.salario,
+              CURRENT_DATE, CASE WHEN f.status = 'ATIVO' THEN 'ATIVO' ELSE 'AFASTADO' END, 'CONCLUIDA'
+       FROM funcionarios f
+       ON CONFLICT (cpf) DO NOTHING`
+    );
+    await run(
+      `INSERT INTO funcionarios_colaboradores (funcionario_id,colaborador_id)
+       SELECT f.id,c.id FROM funcionarios f JOIN colaboradores c ON c.cpf=f.cpf
+       ON CONFLICT DO NOTHING`
+    );
+    await run(
+      `UPDATE colaboradores
+          SET filial_id = (SELECT id FROM filiais WHERE codigo = 'MATRIZ-SP')
+        WHERE filial_id IS NULL`
+    );
+    await run(
+      `INSERT INTO colaboradores_escalas (colaborador_id, escala_id, inicio)
+       SELECT c.id, e.id, GREATEST(COALESCE(c.data_admissao, CURRENT_DATE), e.inicio_vigencia)
+         FROM colaboradores c
+         CROSS JOIN LATERAL (
+           SELECT id, inicio_vigencia FROM escalas_trabalho
+            WHERE tipo = '5X2' AND ativo
+            ORDER BY id LIMIT 1
+         ) e
+        WHERE NOT EXISTS (
+          SELECT 1 FROM colaboradores_escalas ce WHERE ce.colaborador_id = c.id
+        )`
+    );
     await run(
       `INSERT INTO carteira_colaborador (colaborador_id,competencia,saldo_total_centavos,saldo_alocado_centavos)
        SELECT c.id,date_trunc('month',current_date)::date,120000,0 FROM colaboradores c WHERE c.status<>'DESLIGADO'

@@ -11,6 +11,12 @@ export interface PayrollEmployeeRow {
   departamento_id: number;
   departamento_nome: string;
   cargo_nome: string;
+  matricula_esocial: string | null;
+  categoria_esocial: string | null;
+  estabelecimento_tp_insc: number | null;
+  estabelecimento_nr_insc: string | null;
+  lotacao_esocial: string | null;
+  tabela_rubricas_esocial: string | null;
 }
 
 export interface EmployeeBatchData {
@@ -85,6 +91,10 @@ export async function createPayrollProcessing(competency: string, userId: number
             'id',c.id,'legacyId',fc.funcionario_id,'nome',c.nome_completo,'cpf',c.cpf,
             'salario',c.salario::text,'departamentoId',c.departamento_id,
             'departamentoNome',d.nome,'cargoNome',ca.nome,
+            'matriculaEsocial',pfc.matricula_esocial,'categoriaEsocial',pfc.categoria_esocial,
+            'estabelecimentoTpInsc',pfc.estabelecimento_tp_insc,
+            'estabelecimentoNrInsc',pfc.estabelecimento_nr_insc,
+            'lotacaoEsocial',pfc.lotacao_esocial,'tabelaRubricasEsocial',pfc.tabela_rubricas_esocial,
             'dependentes',(SELECT count(*)::int FROM dependentes_folha df
               WHERE df.colaborador_id=c.id AND df.deduz_irrf AND df.valido_desde<=?
                 AND (df.valido_ate IS NULL OR df.valido_ate>=?)),
@@ -109,6 +119,7 @@ export async function createPayrollProcessing(competency: string, userId: number
         JOIN departamentos d ON d.id=c.departamento_id
         JOIN cargos ca ON ca.id=c.cargo_id
         LEFT JOIN funcionarios_colaboradores fc ON fc.colaborador_id=c.id
+        LEFT JOIN perfis_folha_colaboradores pfc ON pfc.colaborador_id=c.id
         WHERE c.lifecycle_status='ATIVO' AND c.status='ATIVO'
       )
       INSERT INTO snapshots_folha_colaboradores (folha_id,colaborador_id,dados,hash_dados)
@@ -134,7 +145,9 @@ export async function createPayrollProcessing(competency: string, userId: number
 export async function listPayrollProcessings(limit = 18): Promise<Array<Record<string, unknown>>> {
   return all(
     `SELECT f.*,
-      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status='PRONTO_ENVIO') AS eventos_esocial_pendentes
+      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status IN ('PRONTO_ENVIO','ENVIANDO')) AS eventos_esocial_pendentes,
+      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status='REJEITADO') AS eventos_esocial_rejeitados,
+      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status='ACEITO') AS eventos_esocial_aceitos
      FROM folhas_processadas f ORDER BY competencia DESC, versao DESC LIMIT ?`, [limit]
   ) as Promise<Array<Record<string, unknown>>>;
 }
@@ -142,7 +155,9 @@ export async function listPayrollProcessings(limit = 18): Promise<Array<Record<s
 export async function getPayrollProcessing(id: string): Promise<Record<string, unknown> | null> {
   const rows = await all(
     `SELECT f.*,
-      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status='PRONTO_ENVIO') AS eventos_esocial_pendentes
+      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status IN ('PRONTO_ENVIO','ENVIANDO')) AS eventos_esocial_pendentes,
+      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status='REJEITADO') AS eventos_esocial_rejeitados,
+      (SELECT COUNT(*) FROM eventos_esocial_folha e WHERE e.folha_id=f.id AND e.status='ACEITO') AS eventos_esocial_aceitos
      FROM folhas_processadas f WHERE f.id=?`, [id]
   ) as Array<Record<string, unknown>>;
   return rows[0] ?? null;
@@ -199,7 +214,11 @@ export async function loadEmployees(folhaId: string): Promise<PayrollEmployeeRow
       NULLIF(dados->>'legacyId','')::int AS legacy_id,
       dados->>'nome' AS nome,dados->>'cpf' AS cpf,dados->>'salario' AS salario,
       (dados->>'departamentoId')::int AS departamento_id,
-      dados->>'departamentoNome' AS departamento_nome,dados->>'cargoNome' AS cargo_nome
+      dados->>'departamentoNome' AS departamento_nome,dados->>'cargoNome' AS cargo_nome,
+      dados->>'matriculaEsocial' AS matricula_esocial,dados->>'categoriaEsocial' AS categoria_esocial,
+      NULLIF(dados->>'estabelecimentoTpInsc','')::int AS estabelecimento_tp_insc,
+      dados->>'estabelecimentoNrInsc' AS estabelecimento_nr_insc,
+      dados->>'lotacaoEsocial' AS lotacao_esocial,dados->>'tabelaRubricasEsocial' AS tabela_rubricas_esocial
      FROM snapshots_folha_colaboradores WHERE folha_id=? ORDER BY colaborador_id`,
     [folhaId]
   );
@@ -256,6 +275,9 @@ export interface PersistPayslipInput {
 
 export async function persistPayslip(input: PersistPayslipInput): Promise<{ id: string; created: boolean }> {
   return withTransaction(async (tx) => {
+    // Serializa qualquer produtor de eventos com a criacao do S-1299.
+    await tx.all('SELECT id FROM folhas_processadas WHERE id=? FOR UPDATE', [input.folhaId]);
+    await tx.all('SELECT pg_advisory_xact_lock(hashtext(?))', [`esocial-period:${input.competency}`]);
     const r = input.result;
     const demoId = `DM-${input.competency.replace('-', '')}-${input.employee.id}-${input.folhaId}`;
     const existing = await tx.all(
@@ -295,7 +317,13 @@ export async function persistPayslip(input: PersistPayslipInput): Promise<{ id: 
     }
     const payload = {
       evento: 'S-1200', competencia: input.competency, cpf: input.employee.cpf,
-      ideDmDev: demoId, rubricas: r.lines.map((line) => ({ codigo: line.code, natureza: line.nature, valorCentavos: line.amountCents.toString() })),
+      ideDmDev: demoId, matricula: input.employee.matricula_esocial,
+      codCateg: input.employee.categoria_esocial,
+      estabelecimentoTpInsc: input.employee.estabelecimento_tp_insc,
+      estabelecimentoNrInsc: input.employee.estabelecimento_nr_insc,
+      codLotacao: input.employee.lotacao_esocial,
+      ideTabRubr: input.employee.tabela_rubricas_esocial,
+      rubricas: r.lines.map((line) => ({ codigo: line.code, natureza: line.nature, valorCentavos: line.amountCents.toString(), indApurIR: 0 })),
     };
     await tx.run(
       `INSERT INTO eventos_esocial_folha
@@ -363,9 +391,21 @@ export async function failJob(job: Record<string, unknown>, error: unknown): Pro
 
 export async function markSentToBank(folhaId: string, paymentDate: string, userId: number): Promise<void> {
   await withTransaction(async (tx) => {
-    const payslips = await tx.all(`SELECT id, colaborador_id, total_liquido_centavos, esocial_demonstrativo_id FROM contracheques WHERE folha_id=?`, [folhaId]);
+    // Impede que um fechamento observe o periodo entre o INSERT do S-1210 e o commit.
+    await tx.all('SELECT id FROM folhas_processadas WHERE id=? FOR UPDATE', [folhaId]);
+    await tx.all('SELECT pg_advisory_xact_lock(hashtext(?))', [`esocial-period:${paymentDate.slice(0, 7)}`]);
+    const payslips = await tx.all(
+      `SELECT c.id,c.colaborador_id,c.total_liquido_centavos,c.esocial_demonstrativo_id,
+        co.cpf,to_char(fp.competencia,'YYYY-MM') AS competencia
+       FROM contracheques c JOIN colaboradores co ON co.id=c.colaborador_id
+       JOIN folhas_processadas fp ON fp.id=c.folha_id WHERE c.folha_id=?`, [folhaId]
+    );
     for (const payslip of payslips) {
-      const payload = { evento: 'S-1210', dataPagamento: paymentDate, ideDmDev: payslip.esocial_demonstrativo_id, valorLiquidoCentavos: String(payslip.total_liquido_centavos) };
+      const payload = {
+        evento: 'S-1210', dataPagamento: paymentDate, competencia: payslip.competencia,
+        cpf: payslip.cpf, ideDmDev: payslip.esocial_demonstrativo_id,
+        valorLiquidoCentavos: String(payslip.total_liquido_centavos),
+      };
       await tx.run(
         `INSERT INTO eventos_esocial_folha (folha_id, contracheque_id, tipo_evento, chave_idempotencia, payload)
          VALUES (?,?,'S-1210',?,?::jsonb) ON CONFLICT (chave_idempotencia) DO NOTHING`,

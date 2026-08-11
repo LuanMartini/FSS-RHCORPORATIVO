@@ -134,6 +134,20 @@ export async function getDocumentWithCollaborator(id, client = { all }, lock = f
 }
 
 export async function validateDocument(id, decision, justification, userId, client) {
+  const current = await client.all(
+    `SELECT colaborador_id, tipo FROM documentos_admissao WHERE id = ? FOR UPDATE`,
+    [id]
+  );
+  if (!current[0]) return null;
+  if (decision === 'APROVADO') {
+    await client.run(
+      `UPDATE documentos_admissao
+          SET status_validacao = 'RECUSADO', justificativa = 'Substituido por uma revisao aprovada mais recente',
+              updated_at = NOW()
+        WHERE colaborador_id = ? AND tipo = ? AND id <> ? AND status_validacao = 'APROVADO'`,
+      [current[0].colaborador_id, current[0].tipo, id]
+    );
+  }
   const rows = await client.all(
     `UPDATE documentos_admissao
         SET status_validacao = ?, justificativa = ?, validado_por = ?,
@@ -239,4 +253,15 @@ export async function insertContract(input, client) {
     [input.collaboratorId, input.storageKey, input.checksum]
   );
   return rows[0];
+}
+
+export async function getContractWithCollaborator(id, client = { all }) {
+  const rows = await client.all(
+    `SELECT ct.id, ct.storage_key, ct.status, ct.created_at, co.nome_completo
+       FROM contratos_trabalho ct
+       JOIN colaboradores co ON co.id = ct.colaborador_id
+      WHERE ct.id = ?`,
+    [id]
+  );
+  return rows[0] ?? null;
 }

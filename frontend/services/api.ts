@@ -80,6 +80,18 @@ export async function fetchDocumentBlob(documentId: number): Promise<Blob> {
   return response.blob();
 }
 
+export async function fetchContractBlob(contractId: number): Promise<Blob> {
+  const token = getToken();
+  const response = await fetch(`${API_BASE}/core/contratos/${contractId}/conteudo`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { erro?: string };
+    throw new Error(body.erro ?? 'Nao foi possivel baixar o contrato.');
+  }
+  return response.blob();
+}
+
 export async function apiFormData<T>(path: string, formData: FormData, method = 'POST'): Promise<T> {
   const token = getToken();
   const response = await fetch(`${API_BASE}${path}`, {

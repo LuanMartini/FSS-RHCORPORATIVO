@@ -66,12 +66,80 @@ test('colaborador autenticado recebe 403 em rota financeira administrativa', { s
 test('todos os funcionarios legados possuem colaborador canonico', { skip: !enabled }, async () => {
   const { all } = await import('../src/db/client.js');
   const rows = await all(
-    `SELECT count(*)::int AS orfaos FROM funcionarios f
+    `SELECT count(*) FILTER (WHERE c.id IS NULL)::int AS orfaos,
+            count(*) FILTER (
+              WHERE c.id IS NOT NULL
+                AND regexp_replace(f.cpf, '[^0-9]', '', 'g') <> btrim(c.cpf)
+            )::int AS identidades_divergentes
+       FROM funcionarios f
       LEFT JOIN funcionarios_colaboradores m ON m.funcionario_id=f.id
       LEFT JOIN colaboradores c ON c.id=m.colaborador_id
-      WHERE c.id IS NULL`,
+    `,
   );
   assert.equal(Number(rows[0]?.orfaos), 0);
+  assert.equal(Number(rows[0]?.identidades_divergentes), 0);
+});
+
+test('rotas de admissao e desligamento nao alteram funcionarios legados', { skip: !enabled }, async () => {
+  const { all } = await import('../src/db/client.js');
+  const { signToken } = await import('../src/middleware/auth.js');
+  const { createApp } = await import('../src/server.js');
+  const fingerprint = async () => (await all(
+    `SELECT count(*)::int AS total,
+            md5(COALESCE(jsonb_agg(to_jsonb(f) ORDER BY f.id), '[]'::jsonb)::text) AS checksum
+       FROM funcionarios f`,
+  ))[0];
+  const actor = (await all(
+    `SELECT u.id,u.email,u.session_version
+       FROM usuarios u
+      WHERE u.ativo
+        AND EXISTS (SELECT 1 FROM perfis_permissoes p WHERE p.perfil=u.perfil AND p.permissao='employee.write')
+        AND EXISTS (SELECT 1 FROM perfis_permissoes p WHERE p.perfil=u.perfil AND p.permissao='employee.terminate')
+      ORDER BY u.id LIMIT 1`,
+  ))[0];
+  const base = (await all('SELECT id AS cargo_id,departamento_id FROM cargos WHERE ativo ORDER BY id LIMIT 1'))[0];
+  assert.ok(actor, 'o teste requer um usuario com permissoes de admissao e desligamento');
+  assert.ok(base, 'o teste requer ao menos um cargo ativo');
+
+  const suffix = String(Date.now()).slice(-10).padStart(10, '0');
+  const email = `canonical-route-${suffix}@example.invalid`;
+  const token = signToken({ sub: actor.id, email: actor.email, sv: actor.session_version });
+  const before = await fingerprint();
+  const server = http.createServer(createApp());
+  let collaboratorId;
+  await new Promise((resolve) => server.listen(0, resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    const admitted = await fetch(`http://127.0.0.1:${address.port}/rh/admitir`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        nome: 'Rota Canonica Teste', cpf: `6${suffix}`, email,
+        cargoId: Number(base.cargo_id), departamentoId: Number(base.departamento_id), salario: 1000,
+      }),
+    });
+    const admittedBody = await admitted.text();
+    assert.equal(admitted.status, 201, admittedBody);
+    const admission = JSON.parse(admittedBody);
+    collaboratorId = Number(admission.colaboradorId);
+    assert.ok(collaboratorId > 0);
+
+    const terminated = await fetch(`http://127.0.0.1:${address.port}/rh/funcionarios/${collaboratorId}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ versao: 1 }),
+    });
+    assert.equal(terminated.status, 204, await terminated.text());
+    assert.deepEqual(await fingerprint(), before);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (collaboratorId) {
+      await all(`DELETE FROM audit_outbox WHERE recurso_tipo='COLABORADOR' AND recurso_id=? RETURNING id`, [String(collaboratorId)]);
+      await all(`DELETE FROM outbox_eventos WHERE agregado_tipo='COLABORADOR' AND agregado_id=? RETURNING id`, [String(collaboratorId)]);
+      await all('DELETE FROM colaboradores WHERE id=? RETURNING id', [collaboratorId]);
+    }
+  }
 });
 
 test('audit outbox participa do rollback da transacao de negocio', { skip: !enabled }, async () => {

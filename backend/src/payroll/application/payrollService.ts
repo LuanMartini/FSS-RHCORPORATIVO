@@ -2,6 +2,7 @@ import { readDecrypted } from '../../core/infrastructure/encryptedFileStorage.js
 import { PayrollCalculator, BRAZIL_2026_TABLES } from '../domain/payrollCalculator.js';
 import { formatCents, parseCents } from '../domain/money.js';
 import * as repository from '../infrastructure/payrollRepository.js';
+import { createEsocialClosure, listEsocialEvents } from '../esocial/esocialRepository.js';
 
 function validateCompetency(value: unknown): string {
   const competency = String(value ?? '');
@@ -41,6 +42,31 @@ export async function sendToBank(id: string, paymentDateInput: unknown, userId: 
     throw Object.assign(new Error('A folha precisa estar concluida sem falhas para envio ao banco.'), { status: 409 });
   }
   await repository.markSentToBank(id, paymentDate, userId);
+}
+
+export async function esocialEvents(id: string): Promise<Array<Record<string, unknown>>> {
+  await processing(id);
+  return listEsocialEvents(id);
+}
+
+export async function closeEsocialPeriod(
+  id: string,
+  body: Record<string, unknown>,
+  userId: number | null,
+): Promise<Record<string, unknown>> {
+  const fields = ['evtComProd', 'evtContratAvNP', 'evtInfoComplPer'] as const;
+  const missing = fields.filter((field) => typeof body[field] !== 'boolean');
+  if (missing.length) {
+    throw Object.assign(
+      new Error(`Declare explicitamente ${missing.join(', ')} como booleano antes do fechamento.`),
+      { status: 400, code: 'ESOCIAL_CLOSURE_DECLARATIONS_REQUIRED' },
+    );
+  }
+  return createEsocialClosure(id, {
+    evtComProd: body.evtComProd as boolean,
+    evtContratAvNP: body.evtContratAvNP as boolean,
+    evtInfoComplPer: body.evtInfoComplPer as boolean,
+  }, userId);
 }
 
 export async function payslipPdf(id: string): Promise<{ buffer: Buffer; filename: string; sha256: string }> {

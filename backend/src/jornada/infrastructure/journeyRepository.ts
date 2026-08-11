@@ -109,6 +109,18 @@ export async function getScheduleForPeriod(collaboratorId: number, start: string
   return rows[0] ? mapSchedule(rows[0]) : null;
 }
 
+export async function getFirstScheduleInRange(collaboratorId: number, start: string, end: string): Promise<WorkSchedule | null> {
+  const rows = await query<ScheduleRow>(
+    `SELECT e.*, ce.inicio AS atribuicao_inicio, ce.ciclo_offset
+       FROM colaboradores_escalas ce JOIN escalas_trabalho e ON e.id = ce.escala_id
+      WHERE ce.colaborador_id = ? AND ce.inicio <= ?::date
+        AND (ce.fim IS NULL OR ce.fim >= ?::date) AND e.ativo = TRUE
+      ORDER BY ce.inicio ASC LIMIT 1`,
+    [collaboratorId, end, start]
+  );
+  return rows[0] ? mapSchedule(rows[0]) : null;
+}
+
 interface OriginalPunchRow { id: number | string; nsr: number | string; tipo: PunchType; registrado_em: string | Date }
 interface TreatedPunchRow { id: number | string; tipo: PunchType; marcado_em: string | Date; motivo: string; operacao: string }
 
@@ -318,11 +330,13 @@ export async function createAdjustment(input: AdjustmentInsert, client: Database
 }
 
 export async function listAdjustments(collaboratorId?: number): Promise<Record<string, unknown>[]> {
+  const hasCollaboratorFilter = collaboratorId !== undefined;
   return query(
     `SELECT s.*, c.nome_completo AS colaborador_nome
        FROM solicitacoes_ajuste s JOIN colaboradores c ON c.id = s.colaborador_id
-      WHERE (? IS NULL OR s.colaborador_id = ?)
-      ORDER BY s.solicitado_em DESC LIMIT 200`, [collaboratorId ?? null, collaboratorId ?? null]
+      ${hasCollaboratorFilter ? 'WHERE s.colaborador_id = ?' : ''}
+      ORDER BY s.solicitado_em DESC LIMIT 200`,
+    hasCollaboratorFilter ? [collaboratorId] : []
   );
 }
 

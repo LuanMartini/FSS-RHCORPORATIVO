@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { Circle, CircleMarker, MapContainer, Polygon, TileLayer, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { apiFetch } from '../../services/api';
 import { useFocusTrap } from '../a11y/useFocusTrap';
 import type { JornadaConfig, RegistroPontoResposta, TipoMarcacao } from '../../types/jornada';

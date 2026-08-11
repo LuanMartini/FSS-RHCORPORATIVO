@@ -137,6 +137,21 @@ export async function createContract(req, res, next) {
   } catch (error) { next(error); }
 }
 
+export async function downloadContract(req, res, next) {
+  try {
+    const contract = assertFound(
+      await repository.getContractWithCollaborator(positiveId(req.params.id, 'Contrato')),
+      'Contrato nao encontrado.'
+    );
+    const content = await readDecrypted(contract.storage_key);
+    const name = `contrato-${String(contract.nome_completo).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || contract.id}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.send(content);
+  } catch (error) { next(error); }
+}
+
 export async function confirmSignature(req, res, next) {
   try {
     const token = String(req.params.token ?? '');

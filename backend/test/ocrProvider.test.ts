@@ -72,7 +72,7 @@ test('OCR local extrai dados de recibo sintético sem usar o nome do arquivo', a
 
 test('OCR local renderiza PDF antes de reconhecer seu conteúdo', async () => {
   await withLocalOcr(async () => {
-    const pdf = generateEmploymentContract({
+    const pdf = await generateEmploymentContract({
       nome_completo: 'Ana Teste', cpf: '12345678909', cargo_nome: 'Analista',
       departamento_nome: 'RH', salario: 4500, data_admissao: '2026-07-14',
     });

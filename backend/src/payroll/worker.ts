@@ -1,7 +1,10 @@
 import 'dotenv/config';
 import { setTimeout as delay } from 'node:timers/promises';
 import { getPool } from '../db/client.js';
+import { assertIcpBrasilConfiguration } from '../security/icpBrasilSigner.js';
 import { processPayrollJob } from './application/payrollBatchProcessor.js';
+import { assertEsocialTransmissionConfiguration, isEsocialTransmissionEnabled } from './esocial/esocialClient.js';
+import { processNextEsocialEvent } from './esocial/esocialOutboxProcessor.js';
 import { claimNextJob, failJob } from './infrastructure/payrollRepository.js';
 import { initializeErrorTracking, installProcessErrorHandlers, reportError } from '../observability/errorTracking.js';
 import { errorLogFields, logger } from '../observability/logger.js';
@@ -14,22 +17,30 @@ process.on('SIGTERM', () => { running = false; });
 async function run(): Promise<void> {
   await initializeErrorTracking();
   installProcessErrorHandlers();
+  await assertIcpBrasilConfiguration();
+  await assertEsocialTransmissionConfiguration();
   await getPool();
-  logger.info({ event: 'payroll_worker_started', pid: process.pid }, 'Worker de folha iniciado');
+  const esocialEnabled = isEsocialTransmissionEnabled();
+  logger.info({ event: 'payroll_worker_started', pid: process.pid, esocialEnabled }, 'Worker de folha iniciado');
   while (running) {
     try {
+      let worked = false;
       const job = await claimNextJob();
-      if (!job) { await delay(1500); continue; }
-      try {
-        await processPayrollJob(job);
-        recordPayrollWorkerJob('success');
-      } catch (error) {
-        await failJob(job, error);
-        recordPayrollWorkerJob('failure');
-        recordError('payroll_worker', error);
-        logger.error({ event: 'payroll_job_failed', jobId: String(job.id ?? ''), ...errorLogFields(error) }, 'Falha no job de folha');
-        reportError(error, { source: 'payroll_worker', job_id: String(job.id ?? '') });
+      if (job) {
+        worked = true;
+        try {
+          await processPayrollJob(job);
+          recordPayrollWorkerJob('success');
+        } catch (error) {
+          await failJob(job, error);
+          recordPayrollWorkerJob('failure');
+          recordError('payroll_worker', error);
+          logger.error({ event: 'payroll_job_failed', jobId: String(job.id ?? ''), ...errorLogFields(error) }, 'Falha no job de folha');
+          reportError(error, { source: 'payroll_worker', job_id: String(job.id ?? '') });
+        }
       }
+      if (esocialEnabled) worked = await processNextEsocialEvent() || worked;
+      if (!worked) await delay(1500);
     } catch (error) {
       recordError('payroll_worker', error);
       logger.warn({ event: 'payroll_worker_waiting_for_database', ...errorLogFields(error) }, 'Worker aguardando banco ou migracao');

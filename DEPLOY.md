@@ -5,8 +5,8 @@
 Configure estas variaveis no servidor do backend:
 
 ```env
+NODE_ENV=production
 PORT=3333
-DOTENV_CONFIG_QUIET=true
 JWT_SECRET=gere-um-segredo-longo
 JWT_ISSUER=rhcorp-api
 JWT_AUDIENCE=rhcorp-web
@@ -14,11 +14,6 @@ JWT_ACCESS_TTL=10m
 CORS_ORIGIN=https://seu-frontend.com
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX=300
-LOG_LEVEL=info
-ERROR_TRACKING_DSN=https://chave-publica@o0.ingest.sentry.io/projeto
-ERROR_TRACKING_TRACES_SAMPLE_RATE=0.05
-METRICS_ENABLED=true
-METRICS_TOKEN=segredo-longo-exclusivo-para-prometheus
 DB_CLIENT=postgres
 PG_HOST=host-do-banco
 PG_PORT=5432
@@ -29,58 +24,136 @@ PG_SSL=true
 PG_SSL_REJECT_UNAUTHORIZED=true
 PG_POOL_MAX=10
 PG_STATEMENT_TIMEOUT_MS=30000
-FACIAL_MATCH_PROVIDER=local
-FACIAL_MATCH_THRESHOLD=0.82
-OCR_PROVIDER=tesseract
-OCR_MANUAL_REVIEW_THRESHOLD=85
-# Assinatura PAdES/CAdES: use certificado A1 montado como segredo, nunca no Git.
-ICP_BRASIL_MODE=producao
-ICP_BRASIL_SIGNER=p12
-ICP_BRASIL_P12_PATH=/run/secrets/rhcorp-certificado.pfx
-ICP_BRASIL_P12_PASSWORD=senha-vinda-do-gerenciador-de-segredos
-ICP_BRASIL_SIGNATURE_LENGTH=16384
 TRUST_PROXY_HOPS=1
 SEED_ADMIN_EMAIL=admin@empresa.com
 SEED_ADMIN_PASSWORD=troque-essa-senha
 MALWARE_SCANNER_URL=https://scanner-interno.example/scan
 MALWARE_SCANNER_TOKEN=segredo-fornecido-pelo-scanner
+ICP_BRASIL_MODE=producao
+ICP_BRASIL_PROVIDER=a1
+ICP_BRASIL_OPENSSL_BIN=/usr/bin/openssl
+ICP_BRASIL_OPENSSL_TIMEOUT_MS=30000
+ICP_BRASIL_PFX_PATH=/run/secrets/certificado-icp-brasil.pfx
+ICP_BRASIL_PFX_PASSWORD=fornecida-pelo-secret-manager
+ICP_BRASIL_CERT_CHAIN_PATH=/run/secrets/cadeia-icp-brasil.pem
+ICP_BRASIL_PDF_SIGNATURE_LENGTH=32768
+ICP_BRASIL_SIGNER_NAME=Razao social da empresa
+ICP_BRASIL_SIGNER_CONTACT=seguranca@example.com
+ICP_BRASIL_SIGNER_LOCATION=Municipio-UF, Brasil
+ICP_BRASIL_SIGNATURE_REASON=Emissao de documento trabalhista
+ESOCIAL_TRANSMISSION_ENABLED=false
+# Preencha as demais ESOCIAL_* somente ao habilitar; veja a secao Transmissao eSocial.
 LEAVE_WORKER_INTERVAL_MS=300000
 ```
 
-O reconhecimento facial de ponto executa localmente o modelo FaceRes. Em produção,
-`FACIAL_MATCH_PROVIDER=local` é obrigatório; valor ausente ou um provedor ainda não
-implantado bloqueia a marcação. Consulte `docs/biometria-facial.md` antes de ativar.
+## Assinatura ICP-Brasil
 
-O OCR de admissão e reembolsos executa localmente com Tesseract.js e o modelo de
-português empacotado com o backend. Em produção, `OCR_PROVIDER=tesseract` é
-obrigatório; configurações ausentes ou provedores externos não implementados
-bloqueiam o envio. Consulte `docs/ocr-local.md` para limites e revisão humana.
+API e worker de folha validam esta configuracao ao iniciar. Em `NODE_ENV=production`,
+o modo implicito e `producao` e `ICP_BRASIL_MODE=simulado` e recusado. Certificado,
+OpenSSL ou provider ausente impede a inicializacao; nao ha fallback para documento
+simulado ou parcialmente assinado.
 
-Em produção, a assinatura de contracheques e comprovantes de ponto exige
-`ICP_BRASIL_MODE=producao` e o certificado A1 acima. A configuração incompleta
-bloqueia a assinatura; `simulado` é aceito somente fora de produção. O caminho
-A3/HSM depende de um adaptador PKCS#11 específico e também bloqueia enquanto
-não estiver instalado. Consulte `docs/icp-brasil.md` para a homologação e os
-limites regulatórios.
+### Certificado A1
 
-## Observabilidade
+Monte o PFX/P12 como secret somente leitura fora da imagem e injete a senha pelo
+secret manager da plataforma. Nunca grave a senha em arquivo versionado ou na
+linha de comando. Durante a assinatura, a chave e extraida em diretorio temporario
+privado e apagada ao final. Prefira HSM quando a politica da organizacao proibir
+material privado temporario em disco.
 
-Logs saem estruturados em JSON quando `NODE_ENV=production`; use o campo
-`requestId` (tambem devolvido nos headers `X-Request-Id` e
-`X-Correlation-Id`) para correlacionar API, auditoria e erros. Corpos de
-requisicao, senha, token, CPF e valores salariais nao sao registrados.
+PFX antigos que dependem dos algoritmos legados do OpenSSL podem exigir
+`ICP_BRASIL_OPENSSL_PKCS12_LEGACY=true`; habilite somente apos homologacao e plano
+de renovacao do certificado.
 
-`ERROR_TRACKING_DSN` ativa opcionalmente o Sentry. A ausencia dele nao impede a
-API ou os workers de iniciar. `ERROR_TRACKING_TRACES_SAMPLE_RATE` deve ser baixo
-em producao e revisado com o DPO, pois rastreamento de performance pode carregar
-metadados operacionais.
+### Token/HSM A3 por PKCS#11
 
-O endpoint `/metrics` so existe quando `METRICS_ENABLED=true` **e**
-`METRICS_TOKEN` esta configurado. Exponha-o somente na rede interna; o Prometheus
-deve enviar `X-Metrics-Token` (ou `Authorization: Bearer`) com esse segredo. Ele
-exporta requisicoes/latencia por rota e status, erros por tipo, metricas padrao
-do processo e filas pendentes de folha e reembolsos. Nao use CPF, e-mail, ID de
-colaborador ou URL com parametros como label no Prometheus.
+Use OpenSSL 3 com um provider PKCS#11 instalado e compativel com o fabricante do
+token/HSM. O certificado publico fica em PEM; apenas a operacao de chave privada
+ocorre no dispositivo.
+
+```env
+ICP_BRASIL_MODE=producao
+ICP_BRASIL_PROVIDER=pkcs11
+ICP_BRASIL_OPENSSL_BIN=/usr/bin/openssl
+ICP_BRASIL_PKCS11_MODULE=/opt/vendor/lib/libpkcs11.so
+ICP_BRASIL_PKCS11_KEY_URI=pkcs11:token=RH;object=assinatura;type=private
+ICP_BRASIL_PKCS11_CERT_PATH=/run/secrets/certificado-publico.pem
+ICP_BRASIL_PKCS11_PIN=fornecido-pelo-secret-manager
+ICP_BRASIL_PKCS11_PROVIDER=pkcs11
+ICP_BRASIL_PKCS11_PROVIDER_PATH=/usr/lib/ossl-modules
+ICP_BRASIL_CERT_CHAIN_PATH=/run/secrets/cadeia-icp-brasil.pem
+```
+
+Nao inclua `pin-value` em `ICP_BRASIL_PKCS11_KEY_URI`. O PIN e a senha A1 sao
+passados ao OpenSSL por variavel de ambiente do subprocesso, sem interpolacao de
+shell. Valide a URI e o provider para cada modelo de dispositivo.
+
+Em desenvolvimento e teste, `ICP_BRASIL_MODE=simulado` usa HMAC deterministico e
+nao precisa de OpenSSL. Esse resultado e marcado como simulado e nao possui valor
+de assinatura ICP-Brasil. Detalhes da escolha, limites e homologacao estao em
+[docs/assinatura-icp-brasil.md](docs/assinatura-icp-brasil.md).
+
+## Transmissao eSocial
+
+A transmissao fica desabilitada por padrao e nao toca a outbox nesse estado.
+Habilite primeiro em producao restrita. API e worker falham na inicializacao se
+certificado real, XSD ou validador estiverem ausentes; nao ha envio sem assinatura
+nem fallback para o modo simulado.
+
+```env
+ESOCIAL_TRANSMISSION_ENABLED=true
+ESOCIAL_ENVIRONMENT=restrita
+ESOCIAL_EMPLOYER_TP_INSC=1
+ESOCIAL_EMPLOYER_NR_INSC=12345678
+ESOCIAL_TRANSMITTER_TP_INSC=1
+ESOCIAL_TRANSMITTER_NR_INSC=12345678000195
+ESOCIAL_APP_VERSION=FSS-RHCORP-1.0
+ESOCIAL_XSD_DIR=/opt/esocial/xsd/2026-07-01
+ESOCIAL_XSD_VALIDATOR_BIN=/usr/bin/xmllint
+ESOCIAL_REQUEST_TIMEOUT_MS=30000
+ESOCIAL_POLLING_INTERVAL_MS=15000
+# Overrides opcionais; omita para usar os endpoints oficiais do ambiente.
+# ESOCIAL_SEND_URL=https://...
+# ESOCIAL_QUERY_URL=https://...
+```
+
+Baixe o [pacote XSD S-1.3 de 01/07/2026](https://www.gov.br/esocial/pt-br/documentacao-tecnica/manuais/2026-07-01_esquemas_xsd_v_s_01_03_00.zip)
+em um volume somente leitura e confira SHA-256
+`32535dba33d0470cf44afce410840af450028fd32d3df9123f601c45cf9af8e`.
+A pasta configurada deve conter, juntos, `evtRemun.xsd`, `evtPgtos.xsd`,
+`evtFechaEvPer.xsd`, `tipos.xsd` e `xmldsig-core-schema.xsd`. Instale `xmllint`
+(normalmente fornecido por `libxml2-utils`) na imagem do worker e da API.
+
+Para A3/HSM, alem do provider OpenSSL usado na assinatura XML, o mTLS do Node
+precisa do ENGINE PKCS#11 do fabricante/libp11 configurado no host:
+
+```env
+ESOCIAL_PKCS11_TLS_ENGINE=pkcs11
+PKCS11_MODULE_PATH=/opt/vendor/lib/libpkcs11.so
+```
+
+O PIN continua vindo de `ICP_BRASIL_PKCS11_PIN`; ele nao deve ser incluido na URI
+versionada. Homologue ENGINE, provider, token e renovacao com o mesmo certificado
+no envio e na consulta. Se a plataforma desabilitar OpenSSL ENGINE, forneca um
+transport adapter mTLS aprovado antes de usar A3; nao reverta para A1 sem decisao
+de seguranca.
+
+Antes de ligar, preencha em `perfis_folha_colaboradores` os campos
+`matricula_esocial`, `categoria_esocial`, `estabelecimento_tp_insc`,
+`estabelecimento_nr_insc`, `lotacao_esocial` e `tabela_rubricas_esocial`. Eles
+devem coincidir com S-1005/S-1010/S-1020 e com o vinculo existente no RET. Eventos
+antigos sem esses campos sao rejeitados localmente e precisam ser saneados ou
+recriados de forma controlada.
+
+Os endpoints padrao sao os publicados no Manual do Desenvolvedor v1.15:
+
+- restrita, envio e consulta: `webservices.producaorestrita.esocial.gov.br`;
+- producao, envio: `webservices.envio.esocial.gov.br`;
+- producao, consulta: `webservices.consulta.esocial.gov.br`.
+
+Nunca aponte testes automatizados para esses enderecos. O roteiro de homologacao,
+campos da outbox e funcionalidades deliberadamente fora de escopo estao em
+[docs/esocial-transmissao.md](docs/esocial-transmissao.md).
 
 ## Variaveis do frontend
 
@@ -142,7 +215,11 @@ Pasta publicada do frontend: `frontend/dist`.
 - Confirmar que `schema_migrations` nao possui checksum divergente.
 - Executar o worker de folha e o worker de auditoria separados da API.
 - Executar o worker de ferias e configurar scanner antimalware real; uploads falham sem scanner em producao.
-- Montar o PFX A1 como segredo, validar o PDF assinado e homologar cadeia/revogacao com o ITI antes de uso regulatorio.
+- Confirmar OpenSSL 3, certificado A1 ou provider A3 e permissoes dos secrets antes do rollout.
+- Gerar um PAdES e um CAdES em homologacao e arquivar o relatorio do VALIDAR/ITI.
+- Manter `ESOCIAL_TRANSMISSION_ENABLED=false` ate validar XSD, cadastros S-1005/S-1010/S-1020, XMLDSig e mTLS em producao restrita.
+- Confirmar que nenhum S-1299 foi solicitado com eventos pendentes/rejeitados e arquivar os protocolos/recibos da homologacao.
+- Sincronizar o relogio dos hosts; `signingTime` nao substitui carimbo RFC 3161 de uma ACT.
 - Validar TLS `verify-full` no PostgreSQL e Redis privado/autenticado.
 - Garantir que nenhum segredo foi publicado como variavel `VITE_*`.
 

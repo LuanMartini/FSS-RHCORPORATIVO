@@ -21,6 +21,7 @@ coreRoutes.post(
 coreRoutes.patch('/documentos/:id/validacao', authorize('onboarding.document.review'), controller.validateDocument);
 coreRoutes.get('/documentos/:id/conteudo', authorize('onboarding.document.review'), controller.previewDocument);
 coreRoutes.post('/colaboradores/:id/contratos', authorize('onboarding.write'), controller.createContract);
+coreRoutes.get('/contratos/:id/conteudo', authorize('onboarding.read'), controller.downloadContract);
 coreRoutes.post('/colaboradores/:id/ativar', authorize('onboarding.write'), controller.activateCollaborator);
 coreRoutes.get('/organograma', authorize('organization.read'), controller.listOrganization);
 coreRoutes.patch('/organograma/cargos/:cargoId/superior', authorize('organization.write'), controller.changeHierarchy);

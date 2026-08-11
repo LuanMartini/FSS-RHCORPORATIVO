@@ -26,6 +26,17 @@ export async function sendBank(req: Request, res: Response, next: NextFunction):
   } catch (error) { forward(next, error); }
 }
 
+export async function esocialEvents(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { res.json(await service.esocialEvents(String(req.params.id))); } catch (error) { forward(next, error); }
+}
+
+export async function closeEsocial(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const userId = Number((req as Request & { user?: { sub?: number } }).user?.sub) || null;
+    res.status(202).json(await service.closeEsocialPeriod(String(req.params.id), req.body ?? {}, userId));
+  } catch (error) { forward(next, error); }
+}
+
 export async function pdf(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const document = await service.payslipPdf(String(req.params.id));

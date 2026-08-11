@@ -28,10 +28,6 @@ Se tiver Docker instalado, suba um PostgreSQL local com:
 docker compose up -d
 ```
 
-Se a porta `5432` já estiver ocupada no computador, use outra porta local, por
-exemplo `RHCORP_POSTGRES_PORT=55432 docker compose up -d`, e configure o mesmo
-valor em `PG_PORT` no `backend/.env`.
-
 3. Aplique as migracoes e, apenas no primeiro ambiente de desenvolvimento,
 execute o seed explicitamente:
 
@@ -118,28 +114,21 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 O funil está em **Admissão digital** e a árvore com drag-and-drop em
 **Organograma**. O envio em lote usa uma requisição binária por arquivo para
 permitir progresso individual, retry isolado e limite de 10 MB.
-O OCR é local e usa o modelo de português do Tesseract; em produção,
-`OCR_PROVIDER=tesseract` é obrigatório e leituras com baixa confiança ficam
-marcadas para revisão humana. Consulte `docs/ocr-local.md` antes da ativação.
 
 ## Ponto e jornada avançados
 
 O menu **Ponto & Jornada** reúne o espelho mensal, banco de horas, marcação com
-GPS/geofence, comparação facial local por embeddings, escalas 12x36, 6x1, 5x2, rotativas e
+GPS/geofence, captura facial simulada, escalas 12x36, 6x1, 5x2, rotativas e
 flexíveis e solicitações de ajuste em dois níveis. O motor estritamente tipado
 está em `backend/src/jornada` e o schema particionado em
 `backend/src/db/migrations/003_jornada_avancada.sql`.
 
 Câmera e geolocalização exigem contexto seguro (`https`) fora de `localhost`.
-O backend possui assinatura PAdES de PDFs e CMS/CAdES destacado nos comprovantes
-de ponto, com PFX A1 em produção e modo simulado apenas em desenvolvimento/teste.
-Os leiautes fiscais AFD/AEJ, Atestado Técnico e Termo de Responsabilidade continuam
-fora do escopo; também é obrigatória a homologação de certificado, cadeia, revogação
-e carimbo do tempo antes de qualquer uso regulatório. Consulte `docs/icp-brasil.md`.
-A comparação facial usa o modelo local FaceRes e falha
-fechado se o provedor não estiver configurado; ela não inclui detecção de prova de
-vida. Consulte `docs/biometria-facial.md` para as restrições, recadastro obrigatório
-e o procedimento de ativação.
+Cada marcação agora preserva os bytes canônicos do comprovante e sua assinatura
+CAdES: simulada em desenvolvimento/teste ou produzida com certificado ICP-Brasil
+A1/A3 em produção. AFD/AEJ, Atestado Técnico, Termo de Responsabilidade e uma
+biometria certificada continuam obrigatórios antes do uso como REP-P. Veja
+[docs/assinatura-icp-brasil.md](docs/assinatura-icp-brasil.md).
 
 ## Deploy
 
@@ -162,16 +151,22 @@ contracheque idempotente e transacional.
 npm --prefix backend run worker
 ```
 
-Os PDFs sao criptografados em repouso e sempre recebem hash SHA-256. Em produção,
-`ICP_BRASIL_MODE=producao` usa um certificado A1 `.pfx/.p12` para incorporar a
-assinatura PAdES no PDF; em desenvolvimento/teste o modo simulado é explicitamente
-marcado e não tem validade documental. Veja `docs/icp-brasil.md` para configurar
-segredos e realizar a homologação necessária.
+Os PDFs sao criptografados em repouso, recebem hash SHA-256 e passam pelo servico
+PAdES plugavel. Desenvolvimento e testes usam uma assinatura local explicitamente
+simulada. Em producao, configure `ICP_BRASIL_MODE=producao` com certificado A1 ou
+token/HSM A3; configuracao ausente interrompe a API e o worker antes de gerar
+documentos. Variaveis, perfis e roteiro de homologacao estao em
+[docs/assinatura-icp-brasil.md](docs/assinatura-icp-brasil.md).
 
-Os eventos S-1200 e S-1210 sao preparados em uma outbox idempotente, mas a
-transmissao ao ambiente nacional, validacao de leiaute, certificado A1/A3,
-consulta de recibo, totalizadores e fechamento S-1299 permanecem como fronteira
-de integracao. Consulte o contrato REST em `backend/openapi/payroll.yaml`.
+Os eventos S-1200 e S-1210 sao preparados em uma outbox idempotente. O adapter
+eSocial opcional monta o leiaute S-1.3, assina com XMLDSig ICP-Brasil, valida no
+XSD oficial, transmite por SOAP/mTLS e consulta protocolo/recibo ate concluir em
+`ACEITO` ou `REJEITADO`. O S-1299 somente e criado quando nao ha pendencia e
+exige declaracoes explicitas para eventos periodicos fora do escopo deste
+sistema. A transmissao fica desligada por padrao e precisa ser homologada em
+producao restrita antes do uso real. Consulte o contrato em
+`backend/openapi/payroll.yaml` e o roteiro em
+[docs/esocial-transmissao.md](docs/esocial-transmissao.md).
 
 ## ATS de recrutamento e selecao
 
@@ -227,10 +222,8 @@ segunda vez.
 A migration `007_beneficios_reembolsos.sql` inclui limites tributários, carteiras,
 alocações, operações idempotentes, regras de alçada, solicitações, aprovações e
 transações de cartão. Comprovantes JPG, PNG ou PDF são validados por assinatura
-binária, criptografados com AES-256-GCM e processados por OCR local real para
-extrair CNPJ, data, valor, fornecedor e categoria. O valor informado pelo
-colaborador é confrontado com o valor reconhecido; divergências bloqueiam o envio
-e baixa confiança exige revisão humana.
+binária, criptografados com AES-256-GCM e processados por OCR determinístico
+simulado para extrair CNPJ, data, valor, fornecedor e categoria.
 
 Na conciliação, uma transação é bloqueada durante o vínculo e o valor precisa
 corresponder exatamente ao comprovante. Despesas até R$ 500 seguem para o gestor;

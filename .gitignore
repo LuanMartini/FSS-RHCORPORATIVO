@@ -145,4 +145,5 @@ dist
 
 .env
 backend/storage/
+backend/tmp/
 .playwright-cli/

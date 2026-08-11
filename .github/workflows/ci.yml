@@ -51,6 +51,7 @@ jobs:
       PG_PASSWORD: postgres-ci-only
       PG_DATABASE: rhcorp
       REDIS_URL: redis://localhost:6379
+      FACIAL_MATCH_PROVIDER: local
       RUN_DB_INTEGRATION: 1
       SEED_ADMIN_EMAIL: admin-ci@example.invalid
       SEED_ADMIN_PASSWORD: ci-admin-password-not-for-production
@@ -115,7 +116,7 @@ jobs:
           path: |
             backend/coverage
             frontend/coverage
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Dependency audit

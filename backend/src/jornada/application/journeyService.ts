@@ -6,7 +6,7 @@ import { compareBiometric, createFacialTemplate, decodePhotoDataUrl, InvalidFaci
 import { validateGeofence } from '../domain/geofence.ts';
 import { calculateMonthlyMirror } from '../domain/journeyEngine.ts';
 import { facialAlgorithm, facialMatchThreshold, FacialRecognitionError, generateFacialEmbedding } from '../infrastructure/localFaceEmbeddingProvider.ts';
-import { IcpBrasilSigningError, signCades } from '../../security/icpBrasilSigner.ts';
+import { IcpBrasilSigningError, assinarCAdES, getIcpBrasilSignatureInfo } from '../../security/icpBrasilSigner.ts';
 import { PUNCH_TYPES, type Geofence, type PunchType } from '../domain/types.ts';
 import * as repository from '../infrastructure/journeyRepository.ts';
 import type { DatabaseClient } from '../infrastructure/journeyRepository.ts';
@@ -187,14 +187,26 @@ export async function registerPoint(input: {
         timezone: context.filial_timezone, coletorId: collectorId, filial: context.filial_codigo,
         relogio: 'SERVER_UTC_NTP_REQUIRED', hashAnterior: sequence.previousHash,
       };
-      const recordHash = createHash('sha256').update(JSON.stringify(receiptBase)).digest('hex');
-      const signature = await signCades(Buffer.from(JSON.stringify(receiptBase), 'utf8'));
+      const signedPayload = Buffer.from(JSON.stringify(receiptBase), 'utf8');
+      const recordHash = createHash('sha256').update(signedPayload).digest('hex');
+      const cadesSignature = await assinarCAdES(signedPayload);
+      const signatureInfo = getIcpBrasilSignatureInfo('CAdES');
       const receipt = {
         ...receiptBase,
         hashSha256: recordHash,
-        assinaturaCades: signature.signatureBase64,
-        assinaturaStatus: signature.status,
-        assinaturaAlgoritmo: signature.algorithm,
+        assinaturaCades: {
+          formato: signatureInfo.format,
+          perfil: signatureInfo.profile,
+          algoritmo: signatureInfo.algorithm,
+          modo: signatureInfo.mode,
+          destacada: true,
+          valorBase64: cadesSignature.toString('base64'),
+          conteudoBase64: signedPayload.toString('base64'),
+          conteudoSha256: recordHash,
+          canonicalizacao: 'JSON_UTF8_ORDEM_CAMPOS_PONTO_FSS_V1',
+          carimboTempo: signatureInfo.mode === 'producao' ? 'CMS_SIGNING_TIME' : 'DATA_DO_REGISTRO_NO_CONTEUDO',
+        },
+        exportacaoFiscal: { afd: 'NAO_IMPLEMENTADO', aej: 'NAO_IMPLEMENTADO' },
       };
       const point = await repository.insertPoint({
         nsr: sequence.nsr, collaboratorId, filialId: Number(context.filial_id), type,
@@ -240,15 +252,20 @@ export async function getMirror(input: { collaboratorId: unknown; start: unknown
   if (dayCount < 1 || dayCount > 62) throw new AppError('O espelho deve conter entre 1 e 62 dias.');
   const context = await repository.getCollaboratorContext(collaboratorId);
   if (!context) throw new AppError('Colaborador nao encontrado.', 404, 'NOT_FOUND');
-  const schedule = await repository.getScheduleForPeriod(collaboratorId, start);
+  const schedule = await repository.getScheduleForPeriod(collaboratorId, start)
+    ?? await repository.getFirstScheduleInRange(collaboratorId, start, end);
   if (!schedule) throw new AppError('Nenhuma escala vigente para o periodo.', 409, 'SCHEDULE_NOT_FOUND');
+  // PerÃ­odos iniciados antes da admissÃ£o ou da atribuiÃ§Ã£o de escala devem
+  // mostrar somente os dias efetivamente elegÃ­veis, sem registrar ausÃªncias
+  // artificiais e sem bloquear o espelho mensal.
+  const effectiveStart = [start, schedule.assignmentStart, schedule.validFrom].sort().at(-1) ?? start;
   const [punches, holidays, excusedDates, initialBankMinutes] = await Promise.all([
-    repository.getPunches(collaboratorId, start, end),
-    repository.getHolidays(Number(context.filial_id), start, end),
-    repository.getExcusedDates(collaboratorId, start, end),
-    repository.getInitialBankBalance(collaboratorId, start),
+    repository.getPunches(collaboratorId, effectiveStart, end),
+    repository.getHolidays(Number(context.filial_id), effectiveStart, end),
+    repository.getExcusedDates(collaboratorId, effectiveStart, end),
+    repository.getInitialBankBalance(collaboratorId, effectiveStart),
   ]);
-  const mirror = calculateMonthlyMirror({ start, end, schedule, punches, holidays, excusedDates, initialBankMinutes });
+  const mirror = calculateMonthlyMirror({ start: effectiveStart, end, schedule, punches, holidays, excusedDates, initialBankMinutes });
   await withTransaction((rawClient: unknown) => repository.persistMirror(collaboratorId, mirror, asClient(rawClient)));
   return { collaborator: mapCollaborator(context), ...mirror };
 }

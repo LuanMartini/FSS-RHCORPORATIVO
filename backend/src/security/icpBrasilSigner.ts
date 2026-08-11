@@ -1,140 +1,418 @@
-import { createHash, createHmac } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { SignPdf } from '@signpdf/signpdf';
+import { execFile } from 'node:child_process';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { SignPdf, Signer } from '@signpdf/signpdf';
 import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
-import { P12Signer } from '@signpdf/signer-p12';
 import { SUBFILTER_ETSI_CADES_DETACHED } from '@signpdf/utils';
 import { PDFDocument } from 'pdf-lib';
 
-export type IcpBrasilMode = 'simulado' | 'producao';
+const execFileAsync = promisify(execFile);
+const SIMULATED_SECRET = 'FSS-RHCORPORATIVO-ICP-SIMULADO-V1';
+const SIMULATED_PADES_MARKER = '\n% FSS-RHCORP-SIMULATED-PADES-V1 ';
+const CHILD_SECRET_ENV = 'FSS_ICP_BRASIL_SECRET';
 
-export type IcpBrasilSignature = {
-  document: Buffer;
-  sha256: string;
-  status: 'ASSINATURA_SIMULADA' | 'ASSINADO_PADES' | 'ASSINADO_CADES';
-  algorithm: string;
-  signatureBase64: string | null;
-};
+export type IcpBrasilMode = 'simulado' | 'producao';
+export type IcpBrasilProfile = 'PAdES' | 'CAdES';
+
+export interface A1Certificate {
+  provider: 'a1';
+  pfxPath: string;
+  password: string;
+  chainPath?: string;
+}
+
+export interface Pkcs11Certificate {
+  provider: 'pkcs11';
+  modulePath: string;
+  keyUri: string;
+  certificatePath: string;
+  pin: string;
+  providerName?: string;
+  providerPath?: string;
+  chainPath?: string;
+}
+
+export type IcpBrasilCertificate = A1Certificate | Pkcs11Certificate;
+
+export interface IcpBrasilSignatureInfo {
+  mode: IcpBrasilMode;
+  format: 'PAdES' | 'CAdES';
+  profile: 'SIMULADO-HMAC-SHA256' | 'PAdES-B-B' | 'CAdES-BES';
+  algorithm: 'HMAC-SHA256' | 'RSA/ECDSA-SHA256';
+  embedded: boolean;
+}
 
 export class IcpBrasilSigningError extends Error {
-  constructor(
-    message: string,
-    readonly code: 'ICP_BRASIL_MODE_INVALID' | 'ICP_BRASIL_CERTIFICATE_REQUIRED' | 'ICP_BRASIL_PKCS11_NOT_CONFIGURED' | 'ICP_BRASIL_SIGNING_FAILED',
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
+  readonly status = 500;
+  readonly expose = true;
+
+  constructor(message: string, readonly code: string, cause?: unknown) {
+    super(message);
     this.name = 'IcpBrasilSigningError';
+    if (cause !== undefined) Object.defineProperty(this, 'cause', { value: cause, enumerable: false });
   }
 }
 
-function configuredMode(): IcpBrasilMode {
-  const mode = process.env.ICP_BRASIL_MODE ?? 'simulado';
+function configurationError(detail: string): IcpBrasilSigningError {
+  return new IcpBrasilSigningError(
+    `Assinatura ICP-Brasil indisponivel: ${detail}`,
+    'ICP_BRASIL_SIGNER_MISCONFIGURED',
+  );
+}
+
+export function getIcpBrasilMode(): IcpBrasilMode {
+  const configured = process.env.ICP_BRASIL_MODE?.trim().toLowerCase();
+  const mode = configured || (process.env.NODE_ENV === 'production' ? 'producao' : 'simulado');
+  if (mode !== 'simulado' && mode !== 'producao') {
+    throw configurationError('ICP_BRASIL_MODE deve ser simulado ou producao.');
+  }
+  if (process.env.NODE_ENV === 'production' && mode === 'simulado') {
+    throw new IcpBrasilSigningError(
+      'Assinatura simulada e proibida em producao.',
+      'ICP_BRASIL_SIMULATION_FORBIDDEN',
+    );
+  }
+  return mode;
+}
+
+export function getIcpBrasilSignatureInfo(format: IcpBrasilProfile): IcpBrasilSignatureInfo {
+  const mode = getIcpBrasilMode();
   if (mode === 'simulado') {
-    if (process.env.NODE_ENV === 'production') {
-      throw new IcpBrasilSigningError(
-        'ICP_BRASIL_MODE=producao e obrigatorio em producao.',
-        'ICP_BRASIL_CERTIFICATE_REQUIRED',
-      );
-    }
-    return mode;
+    return { mode, format, profile: 'SIMULADO-HMAC-SHA256', algorithm: 'HMAC-SHA256', embedded: format === 'PAdES' };
   }
-  if (mode === 'producao') return mode;
-  throw new IcpBrasilSigningError('ICP_BRASIL_MODE deve ser simulado ou producao.', 'ICP_BRASIL_MODE_INVALID');
-}
-
-function simulationSignature(kind: 'PAdES' | 'CAdES', payload: Buffer): IcpBrasilSignature {
-  const secret = process.env.ICP_BRASIL_SIMULATION_SECRET ?? 'rhcorp-icp-brasil-simulacao-v1';
-  const signatureBase64 = createHmac('sha256', secret).update(kind).update(payload).digest('base64');
   return {
-    document: payload,
-    sha256: createHash('sha256').update(payload).digest('hex'),
-    status: 'ASSINATURA_SIMULADA',
-    algorithm: 'HMAC-SHA256-SIMULADO',
-    signatureBase64,
+    mode,
+    format,
+    profile: format === 'PAdES' ? 'PAdES-B-B' : 'CAdES-BES',
+    algorithm: 'RSA/ECDSA-SHA256',
+    embedded: format === 'PAdES',
   };
 }
 
-async function productionP12Signer(): Promise<P12Signer> {
-  const signerType = process.env.ICP_BRASIL_SIGNER ?? 'p12';
-  if (signerType === 'pkcs11') {
-    throw new IcpBrasilSigningError(
-      'Assinador PKCS#11 (A3/HSM) ainda nao foi configurado neste ambiente.',
-      'ICP_BRASIL_PKCS11_NOT_CONFIGURED',
-    );
+function required(value: string | undefined, variable: string): string {
+  const normalized = value?.trim();
+  if (!normalized) throw configurationError(`configure ${variable}.`);
+  return normalized;
+}
+
+export function resolveIcpBrasilCertificate(certificate?: IcpBrasilCertificate): IcpBrasilCertificate {
+  if (certificate) return certificate;
+  const provider = (process.env.ICP_BRASIL_PROVIDER ?? 'a1').trim().toLowerCase();
+  if (provider === 'a1') {
+    const chainPath = process.env.ICP_BRASIL_CERT_CHAIN_PATH?.trim();
+    return {
+      provider,
+      pfxPath: required(process.env.ICP_BRASIL_PFX_PATH, 'ICP_BRASIL_PFX_PATH'),
+      password: required(process.env.ICP_BRASIL_PFX_PASSWORD, 'ICP_BRASIL_PFX_PASSWORD'),
+      ...(chainPath ? { chainPath } : {}),
+    };
   }
-  if (signerType !== 'p12') {
-    throw new IcpBrasilSigningError('ICP_BRASIL_SIGNER deve ser p12 ou pkcs11.', 'ICP_BRASIL_CERTIFICATE_REQUIRED');
+  if (provider === 'pkcs11') {
+    const providerName = process.env.ICP_BRASIL_PKCS11_PROVIDER?.trim();
+    const providerPath = process.env.ICP_BRASIL_PKCS11_PROVIDER_PATH?.trim();
+    const chainPath = process.env.ICP_BRASIL_CERT_CHAIN_PATH?.trim();
+    return {
+      provider,
+      modulePath: required(process.env.ICP_BRASIL_PKCS11_MODULE, 'ICP_BRASIL_PKCS11_MODULE'),
+      keyUri: required(process.env.ICP_BRASIL_PKCS11_KEY_URI, 'ICP_BRASIL_PKCS11_KEY_URI'),
+      certificatePath: required(process.env.ICP_BRASIL_PKCS11_CERT_PATH, 'ICP_BRASIL_PKCS11_CERT_PATH'),
+      pin: required(process.env.ICP_BRASIL_PKCS11_PIN, 'ICP_BRASIL_PKCS11_PIN'),
+      ...(providerName ? { providerName } : {}),
+      ...(providerPath ? { providerPath } : {}),
+      ...(chainPath ? { chainPath } : {}),
+    };
   }
-  const certificatePath = process.env.ICP_BRASIL_P12_PATH?.trim();
-  if (!certificatePath || process.env.ICP_BRASIL_P12_PASSWORD === undefined) {
-    throw new IcpBrasilSigningError(
-      'Certificado A1 ausente. Configure ICP_BRASIL_P12_PATH e ICP_BRASIL_P12_PASSWORD.',
-      'ICP_BRASIL_CERTIFICATE_REQUIRED',
-    );
-  }
+  throw configurationError('ICP_BRASIL_PROVIDER deve ser a1 ou pkcs11.');
+}
+
+async function assertReadableFile(path: string, label: string): Promise<void> {
   try {
-    return new P12Signer(await readFile(certificatePath), { passphrase: process.env.ICP_BRASIL_P12_PASSWORD });
-  } catch (cause) {
+    const metadata = await stat(path);
+    if (!metadata.isFile()) throw new Error('not a file');
+  } catch (error) {
+    throw configurationError(`${label} nao aponta para um arquivo legivel.`);
+  }
+}
+
+function opensslBinary(): string {
+  return process.env.ICP_BRASIL_OPENSSL_BIN?.trim() || 'openssl';
+}
+
+async function runOpenSsl(args: string[], secret?: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<void> {
+  const timeout = Number(process.env.ICP_BRASIL_OPENSSL_TIMEOUT_MS ?? 30_000);
+  try {
+    await execFileAsync(opensslBinary(), args, {
+      env: { ...process.env, ...extraEnv, ...(secret === undefined ? {} : { [CHILD_SECRET_ENV]: secret }) },
+      timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+      windowsHide: true,
+    });
+  } catch (error) {
     throw new IcpBrasilSigningError(
-      'Nao foi possivel carregar o certificado A1 configurado para ICP-Brasil.',
-      'ICP_BRASIL_CERTIFICATE_REQUIRED',
-      { cause },
+      'Nao foi possivel produzir a assinatura ICP-Brasil com o provedor configurado.',
+      'ICP_BRASIL_SIGNING_FAILED',
+      error,
     );
   }
 }
 
-function signatureLength(): number {
-  const configured = Number(process.env.ICP_BRASIL_SIGNATURE_LENGTH ?? 16384);
-  if (!Number.isSafeInteger(configured) || configured < 8192 || configured > 65536) {
-    throw new IcpBrasilSigningError('ICP_BRASIL_SIGNATURE_LENGTH deve estar entre 8192 e 65536.', 'ICP_BRASIL_SIGNING_FAILED');
+async function validateCertificateFiles(certificate: IcpBrasilCertificate): Promise<void> {
+  if (certificate.provider === 'a1') {
+    if (!certificate.pfxPath.trim() || !certificate.password) throw configurationError('certificado A1 incompleto.');
+    await assertReadableFile(certificate.pfxPath, 'ICP_BRASIL_PFX_PATH');
+  } else {
+    if (!certificate.modulePath.trim() || !certificate.keyUri.trim() || !certificate.certificatePath.trim() || !certificate.pin) {
+      throw configurationError('configuracao PKCS#11 incompleta.');
+    }
+    await Promise.all([
+      assertReadableFile(certificate.modulePath, 'ICP_BRASIL_PKCS11_MODULE'),
+      assertReadableFile(certificate.certificatePath, 'ICP_BRASIL_PKCS11_CERT_PATH'),
+    ]);
   }
-  return configured;
+  if (certificate.chainPath) await assertReadableFile(certificate.chainPath, 'ICP_BRASIL_CERT_CHAIN_PATH');
 }
 
-/** Assina PDF com PAdES usando um certificado A1 configurado no ambiente. */
-export async function signPades(pdf: Buffer): Promise<IcpBrasilSignature> {
-  if (configuredMode() === 'simulado') return simulationSignature('PAdES', pdf);
+export async function assertIcpBrasilConfiguration(certificate?: IcpBrasilCertificate): Promise<void> {
+  if (getIcpBrasilMode() === 'simulado') return;
+  const resolved = resolveIcpBrasilCertificate(certificate);
+  await validateCertificateFiles(resolved);
+  await runOpenSsl(['version']);
+}
+
+function simulatedSignature(format: IcpBrasilProfile, payload: Buffer): Buffer {
+  const secret = process.env.ICP_BRASIL_SIMULATION_SECRET || SIMULATED_SECRET;
+  const contentSha256 = createHash('sha256').update(payload).digest('hex');
+  const mac = createHmac('sha256', secret).update(`${format}\n${contentSha256}`).digest('hex');
+  return Buffer.from(JSON.stringify({
+    type: 'FSS-RHCORP-SIMULATED-SIGNATURE', version: 1, format,
+    contentSha256, algorithm: 'HMAC-SHA256', signature: mac,
+  }), 'utf8');
+}
+
+function safeEqual(left: Buffer, right: Buffer): boolean {
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+export function verifySimulatedCAdES(payload: Buffer, signature: Buffer): boolean {
+  return safeEqual(simulatedSignature('CAdES', payload), signature);
+}
+
+export function verifySimulatedPAdES(pdf: Buffer, signedPdf: Buffer): boolean {
+  const expected = Buffer.concat([
+    pdf,
+    Buffer.from(`${SIMULATED_PADES_MARKER}${simulatedSignature('PAdES', pdf).toString('base64url')}\n`, 'ascii'),
+  ]);
+  return safeEqual(expected, signedPdf);
+}
+
+function pkcs12Args(): string[] {
+  return process.env.ICP_BRASIL_OPENSSL_PKCS12_LEGACY === 'true' ? ['-legacy'] : [];
+}
+
+function pdfSignatureLength(): number {
+  const length = Number(process.env.ICP_BRASIL_PDF_SIGNATURE_LENGTH ?? 32_768);
+  if (!Number.isSafeInteger(length) || length < 8_192 || length > 262_144) {
+    throw configurationError('ICP_BRASIL_PDF_SIGNATURE_LENGTH deve estar entre 8192 e 262144 bytes.');
+  }
+  return length;
+}
+
+async function signWithA1(payload: Buffer, certificate: A1Certificate): Promise<Buffer> {
+  const directory = await mkdtemp(join(tmpdir(), 'rhcorp-icp-a1-'));
+  const inputPath = join(directory, 'payload.bin');
+  const outputPath = join(directory, 'signature.p7s');
+  const signerPath = join(directory, 'signer.pem');
+  const keyPath = join(directory, 'signer-key.pem');
+  const embeddedChainPath = join(directory, 'embedded-chain.pem');
   try {
-    const pdfDocument = await PDFDocument.load(pdf, { ignoreEncryption: true });
+    await chmod(directory, 0o700).catch(() => undefined);
+    await writeFile(inputPath, payload, { mode: 0o600 });
+    const legacy = pkcs12Args();
+    await runOpenSsl([
+      'pkcs12', ...legacy, '-in', certificate.pfxPath, '-clcerts', '-nokeys',
+      '-out', signerPath, '-passin', `env:${CHILD_SECRET_ENV}`,
+    ], certificate.password);
+    await runOpenSsl([
+      'pkcs12', ...legacy, '-in', certificate.pfxPath, '-nocerts', '-nodes',
+      '-out', keyPath, '-passin', `env:${CHILD_SECRET_ENV}`,
+    ], certificate.password);
+    await chmod(keyPath, 0o600).catch(() => undefined);
+    await runOpenSsl([
+      'pkcs12', ...legacy, '-in', certificate.pfxPath, '-cacerts', '-nokeys',
+      '-out', embeddedChainPath, '-passin', `env:${CHILD_SECRET_ENV}`,
+    ], certificate.password);
+    const chain = await readFile(embeddedChainPath, 'utf8');
+    const chainPath = certificate.chainPath ?? (chain.includes('BEGIN CERTIFICATE') ? embeddedChainPath : undefined);
+    const cmsArgs = [
+      'cms', '-sign', '-binary', '-in', inputPath, '-out', outputPath, '-outform', 'DER',
+      '-signer', signerPath, '-inkey', keyPath, '-md', 'sha256', '-cades', '-nosmimecap',
+      ...(chainPath ? ['-certfile', chainPath] : []),
+    ];
+    await runOpenSsl(cmsArgs);
+    return await readFile(outputPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function signWithPkcs11(payload: Buffer, certificate: Pkcs11Certificate): Promise<Buffer> {
+  const directory = await mkdtemp(join(tmpdir(), 'rhcorp-icp-pkcs11-'));
+  const inputPath = join(directory, 'payload.bin');
+  const outputPath = join(directory, 'signature.p7s');
+  try {
+    await chmod(directory, 0o700).catch(() => undefined);
+    await writeFile(inputPath, payload, { mode: 0o600 });
+    const providerName = certificate.providerName ?? 'pkcs11';
+    const args = [
+      'cms', '-sign', '-binary', '-in', inputPath, '-out', outputPath, '-outform', 'DER',
+      '-signer', certificate.certificatePath, '-inkey', certificate.keyUri,
+      '-md', 'sha256', '-cades', '-nosmimecap',
+      ...(certificate.chainPath ? ['-certfile', certificate.chainPath] : []),
+      ...(certificate.providerPath ? ['-provider-path', certificate.providerPath] : []),
+      '-provider', 'default', '-provider', providerName,
+      '-passin', `env:${CHILD_SECRET_ENV}`,
+    ];
+    await runOpenSsl(args, certificate.pin, { PKCS11_MODULE_PATH: certificate.modulePath });
+    return await readFile(outputPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function productionCades(payload: Buffer, certificate?: IcpBrasilCertificate): Promise<Buffer> {
+  const resolved = resolveIcpBrasilCertificate(certificate);
+  await validateCertificateFiles(resolved);
+  return resolved.provider === 'a1'
+    ? signWithA1(payload, resolved)
+    : signWithPkcs11(payload, resolved);
+}
+
+/**
+ * Retorna apenas o certificado final em PEM. Esta primitiva e compartilhada
+ * pelo XMLDSig do eSocial; cadeia e chave privada nunca sao embutidas no XML.
+ */
+export async function getIcpBrasilCertificatePem(certificate?: IcpBrasilCertificate): Promise<string> {
+  if (getIcpBrasilMode() !== 'producao') {
+    throw new IcpBrasilSigningError(
+      'Certificado ICP-Brasil real e obrigatorio para XML eSocial.',
+      'ICP_BRASIL_REAL_CERTIFICATE_REQUIRED',
+    );
+  }
+  const resolved = resolveIcpBrasilCertificate(certificate);
+  await validateCertificateFiles(resolved);
+  if (resolved.provider === 'pkcs11') return readFile(resolved.certificatePath, 'utf8');
+
+  const directory = await mkdtemp(join(tmpdir(), 'rhcorp-icp-cert-'));
+  const signerPath = join(directory, 'signer.pem');
+  try {
+    await chmod(directory, 0o700).catch(() => undefined);
+    await runOpenSsl([
+      'pkcs12', ...pkcs12Args(), '-in', resolved.pfxPath, '-clcerts', '-nokeys',
+      '-out', signerPath, '-passin', `env:${CHILD_SECRET_ENV}`,
+    ], resolved.password);
+    return await readFile(signerPath, 'utf8');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Assina bytes com RSA-SHA256 sem criar um envelope CMS/CAdES. */
+export async function assinarRsaSha256(payload: Buffer, certificate?: IcpBrasilCertificate): Promise<Buffer> {
+  if (!Buffer.isBuffer(payload) || payload.length === 0) {
+    throw new IcpBrasilSigningError('Conteudo vazio nao pode ser assinado.', 'ICP_BRASIL_INVALID_PAYLOAD');
+  }
+  if (getIcpBrasilMode() !== 'producao') {
+    throw new IcpBrasilSigningError(
+      'Assinatura XML eSocial exige certificado ICP-Brasil real.',
+      'ICP_BRASIL_REAL_CERTIFICATE_REQUIRED',
+    );
+  }
+  const resolved = resolveIcpBrasilCertificate(certificate);
+  await validateCertificateFiles(resolved);
+  const directory = await mkdtemp(join(tmpdir(), 'rhcorp-icp-rsa-'));
+  const inputPath = join(directory, 'payload.bin');
+  const outputPath = join(directory, 'signature.bin');
+  const keyPath = join(directory, 'signer-key.pem');
+  try {
+    await chmod(directory, 0o700).catch(() => undefined);
+    await writeFile(inputPath, payload, { mode: 0o600 });
+    if (resolved.provider === 'a1') {
+      await runOpenSsl([
+        'pkcs12', ...pkcs12Args(), '-in', resolved.pfxPath, '-nocerts', '-nodes',
+        '-out', keyPath, '-passin', `env:${CHILD_SECRET_ENV}`,
+      ], resolved.password);
+      await chmod(keyPath, 0o600).catch(() => undefined);
+      await runOpenSsl(['dgst', '-sha256', '-sign', keyPath, '-out', outputPath, inputPath]);
+    } else {
+      const providerName = resolved.providerName ?? 'pkcs11';
+      await runOpenSsl([
+        'dgst', '-sha256', '-sign', resolved.keyUri, '-out', outputPath,
+        ...(resolved.providerPath ? ['-provider-path', resolved.providerPath] : []),
+        '-provider', 'default', '-provider', providerName,
+        '-passin', `env:${CHILD_SECRET_ENV}`, inputPath,
+      ], resolved.pin, { PKCS11_MODULE_PATH: resolved.modulePath });
+    }
+    return await readFile(outputPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+class OpenSslCadesSigner extends Signer {
+  constructor(private readonly certificate?: IcpBrasilCertificate) {
+    super();
+  }
+
+  override async sign(payload: Buffer): Promise<Buffer> {
+    return productionCades(payload, this.certificate);
+  }
+}
+
+export async function assinarCAdES(payload: Buffer, certificate?: IcpBrasilCertificate): Promise<Buffer> {
+  if (!Buffer.isBuffer(payload) || payload.length === 0) {
+    throw new IcpBrasilSigningError('Conteudo vazio nao pode ser assinado.', 'ICP_BRASIL_INVALID_PAYLOAD');
+  }
+  return getIcpBrasilMode() === 'simulado'
+    ? simulatedSignature('CAdES', payload)
+    : productionCades(payload, certificate);
+}
+
+export async function assinarPAdES(pdf: Buffer, certificate?: IcpBrasilCertificate): Promise<Buffer> {
+  if (!Buffer.isBuffer(pdf) || !pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+    throw new IcpBrasilSigningError('Documento informado nao e um PDF valido.', 'ICP_BRASIL_INVALID_PDF');
+  }
+  if (getIcpBrasilMode() === 'simulado') {
+    return Buffer.concat([
+      pdf,
+      Buffer.from(`${SIMULATED_PADES_MARKER}${simulatedSignature('PAdES', pdf).toString('base64url')}\n`, 'ascii'),
+    ]);
+  }
+
+  try {
+    const signingTime = new Date();
+    const pdfDocument = await PDFDocument.load(pdf, { updateMetadata: false });
     pdflibAddPlaceholder({
       pdfDoc: pdfDocument,
-      reason: process.env.ICP_BRASIL_SIGNATURE_REASON ?? 'Assinatura de documento corporativo',
-      contactInfo: process.env.ICP_BRASIL_SIGNATURE_CONTACT ?? '',
-      name: process.env.ICP_BRASIL_SIGNATURE_NAME ?? 'RHCORPORATIVO',
-      location: process.env.ICP_BRASIL_SIGNATURE_LOCATION ?? 'Brasil',
-      signatureLength: signatureLength(),
+      reason: process.env.ICP_BRASIL_SIGNATURE_REASON?.trim() || 'Contracheque emitido pelo FSS RH Corporativo',
+      contactInfo: process.env.ICP_BRASIL_SIGNER_CONTACT?.trim() || '',
+      name: process.env.ICP_BRASIL_SIGNER_NAME?.trim() || 'FSS RH Corporativo',
+      location: process.env.ICP_BRASIL_SIGNER_LOCATION?.trim() || 'Brasil',
+      signingTime,
+      signatureLength: pdfSignatureLength(),
       subFilter: SUBFILTER_ETSI_CADES_DETACHED,
-      appName: 'RHCORPORATIVO',
+      appName: 'FSS RH Corporativo',
     });
-    const preparedPdf = Buffer.from(await pdfDocument.save({ useObjectStreams: false }));
-    const signedPdf = await new SignPdf().sign(preparedPdf, await productionP12Signer(), new Date());
-    return {
-      document: signedPdf,
-      sha256: createHash('sha256').update(signedPdf).digest('hex'),
-      status: 'ASSINADO_PADES',
-      algorithm: 'PAdES/ETSI.CAdES.detached/SHA-256',
-      signatureBase64: null,
-    };
+    const withPlaceholder = Buffer.from(await pdfDocument.save({ useObjectStreams: false }));
+    return await new SignPdf().sign(withPlaceholder, new OpenSslCadesSigner(certificate), signingTime);
   } catch (error) {
     if (error instanceof IcpBrasilSigningError) throw error;
-    throw new IcpBrasilSigningError('Falha ao aplicar assinatura PAdES ICP-Brasil no PDF.', 'ICP_BRASIL_SIGNING_FAILED', { cause: error });
-  }
-}
-
-/** Produz CMS/PKCS#7 destacado para o payload canÃ´nico do registro de ponto. */
-export async function signCades(payload: Buffer): Promise<IcpBrasilSignature> {
-  if (configuredMode() === 'simulado') return simulationSignature('CAdES', payload);
-  try {
-    const signature = await (await productionP12Signer()).sign(payload, new Date());
-    return {
-      document: payload,
-      sha256: createHash('sha256').update(payload).digest('hex'),
-      status: 'ASSINADO_CADES',
-      algorithm: 'CMS/PKCS#7-detached/SHA-256',
-      signatureBase64: signature.toString('base64'),
-    };
-  } catch (error) {
-    if (error instanceof IcpBrasilSigningError) throw error;
-    throw new IcpBrasilSigningError('Falha ao gerar assinatura CAdES ICP-Brasil.', 'ICP_BRASIL_SIGNING_FAILED', { cause: error });
+    throw new IcpBrasilSigningError(
+      'Nao foi possivel produzir a assinatura PAdES ICP-Brasil.',
+      'ICP_BRASIL_SIGNING_FAILED',
+      error,
+    );
   }
 }

@@ -96,11 +96,11 @@ export default function Register({ onSwitch }: Props) {
               <input
                 id="register-senha"
                 type="password"
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 12 caracteres"
                 value={form.senha}
                 onChange={e => setForm({ ...form, senha: e.target.value })}
                 required
-                minLength={6}
+                minLength={12}
                 className="w-full px-4 py-3 border-[1.5px] border-slate-200 rounded-lg text-sm text-slate-800 outline-none focus:border-[#0f2340] focus:ring-2 focus:ring-[#0f2340]/8 transition-all"
               />
             </div>

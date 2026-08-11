@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { formatCents } from '../domain/money.js';
 import type { PayrollResult } from '../domain/types.js';
 import type { PayrollEmployeeRow } from './payrollRepository.js';
-import { signPades } from '../../security/icpBrasilSigner.ts';
+import { assinarPAdES, getIcpBrasilSignatureInfo } from '../../security/icpBrasilSigner.js';
 
 function ascii(value: unknown): string {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '');
@@ -65,5 +66,13 @@ export async function signPayslip(pdf: Buffer): Promise<{
   algorithm: string;
   signatureBase64: string | null;
 }> {
-  return signPades(pdf);
+  const document = await assinarPAdES(pdf);
+  const info = getIcpBrasilSignatureInfo('PAdES');
+  return {
+    document,
+    sha256: createHash('sha256').update(document).digest('hex'),
+    status: info.mode === 'producao' ? 'ASSINADO_PADES' : 'ASSINADO_SIMULADO',
+    algorithm: `${info.profile}/${info.algorithm}`,
+    signatureBase64: null,
+  };
 }

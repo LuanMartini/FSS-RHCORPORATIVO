@@ -25,7 +25,7 @@ export async function createContract(collaboratorId, actor) {
       if (!['INTEGRACAO_SISTEMICA', 'CONCLUIDA'].includes(collaborator.etapa_admissao)) {
         throw new AppError('Todos os documentos devem estar aprovados antes de gerar o contrato.', 409, 'WORKFLOW_INVALID_STAGE');
       }
-      const pdf = generateEmploymentContract(collaborator);
+      const pdf = await generateEmploymentContract(collaborator);
       storageKey = await saveEncrypted(pdf);
       const created = await repository.insertContract({ collaboratorId, storageKey, checksum: sha256(pdf) }, client);
       await client.run(

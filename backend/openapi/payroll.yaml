@@ -1,0 +1,168 @@
+openapi: 3.1.0
+info:
+  title: FSS RH Corporativo - Folha e eSocial
+  version: 1.1.0
+  description: Contrato REST da folha. A transmissao eSocial e assincrona e preserva os estados historicos da outbox.
+servers:
+  - url: /payroll
+security:
+  - bearerAuth: []
+paths:
+  /dashboard:
+    get:
+      summary: Dashboard e ultimos processamentos
+      parameters:
+        - in: query
+          name: competencia
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '200': { description: Dashboard da folha }
+  /processamentos:
+    post:
+      summary: Inicia uma folha idempotente por versao
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [competencia]
+              properties:
+                competencia: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '202': { description: Processamento enfileirado }
+  /processamentos/{id}:
+    get:
+      summary: Consulta o processamento
+      parameters: [{ $ref: '#/components/parameters/PayrollId' }]
+      responses:
+        '200': { description: Estado e totais da folha }
+        '404': { description: Processamento inexistente }
+  /processamentos/{id}/enviar-banco:
+    post:
+      summary: Marca envio bancario e cria eventos S-1210
+      parameters: [{ $ref: '#/components/parameters/PayrollId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dataPagamento]
+              properties:
+                dataPagamento: { type: string, format: date }
+      responses:
+        '202': { description: Eventos S-1210 gravados na outbox }
+        '409': { description: Folha ainda nao concluida sem erros }
+  /processamentos/{id}/esocial/eventos:
+    get:
+      summary: Lista protocolo, recibo, rejeicoes e tentativas eSocial da folha
+      parameters: [{ $ref: '#/components/parameters/PayrollId' }]
+      responses:
+        '200':
+          description: Eventos sem expor payload fiscal/XML
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EsocialEvent' }
+  /processamentos/{id}/esocial/fechar:
+    post:
+      summary: Solicita S-1299 se todos os eventos do periodo estiverem ACEITO
+      description: As tres declaracoes precisam ser explicitas porque o sistema nao produz S-1260, S-1270 ou S-1280.
+      parameters: [{ $ref: '#/components/parameters/PayrollId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [evtComProd, evtContratAvNP, evtInfoComplPer]
+              properties:
+                evtComProd: { type: boolean, description: Existem eventos S-1260 no periodo. }
+                evtContratAvNP: { type: boolean, description: Existem eventos S-1270 no periodo. }
+                evtInfoComplPer: { type: boolean, description: Existem eventos S-1280 no periodo. }
+      responses:
+        '202': { description: S-1299 criado ou retornado idempotentemente }
+        '400': { description: Declaracao fiscal ausente }
+        '409':
+          description: Fechamento bloqueado por evento pendente, em processamento, rejeitado ou cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  erro: { type: string }
+                  codigo: { const: ESOCIAL_CLOSURE_BLOCKED }
+                  detalhes:
+                    type: object
+                    properties:
+                      blockers:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            tipo_evento: { enum: [S-1200, S-1210] }
+                            status: { $ref: '#/components/schemas/EsocialStatus' }
+                            chave_idempotencia: { type: string }
+                            ultimo_erro: { type: [string, 'null'] }
+  /contracheques/{id}/pdf:
+    get:
+      summary: Obtem o contracheque PDF assinado
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: PDF
+          content: { application/pdf: {} }
+        '404': { description: Contracheque inexistente }
+  /simular:
+    post:
+      summary: Simula calculo sem persistir uma folha
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Calculo simulado }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    PayrollId:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer }
+  schemas:
+    EsocialStatus:
+      type: string
+      enum: [PRONTO_ENVIO, ENVIANDO, ACEITO, REJEITADO, CANCELADO]
+      description: PRONTO_ENVIO equivale a pendente; ENVIANDO inclui espera de consulta; ACEITO equivale a processado com sucesso.
+    EsocialEvent:
+      type: object
+      properties:
+        id: { type: integer }
+        folha_id: { type: integer }
+        contracheque_id: { type: [integer, 'null'] }
+        tipo_evento: { enum: [S-1200, S-1210, S-1299] }
+        chave_idempotencia: { type: string }
+        status: { $ref: '#/components/schemas/EsocialStatus' }
+        event_id: { type: [string, 'null'], pattern: '^ID[12][A-Z0-9]{12}[0-9]{21}$' }
+        protocolo: { type: [string, 'null'] }
+        recibo: { type: [string, 'null'] }
+        tentativas: { type: integer }
+        consultas: { type: integer }
+        ultimo_erro: { type: [string, 'null'] }
+        resposta: { type: [object, 'null'] }
+        criado_em: { type: string, format: date-time }
+        enviado_em: { type: [string, 'null'], format: date-time }
+        atualizado_em: { type: string, format: date-time }

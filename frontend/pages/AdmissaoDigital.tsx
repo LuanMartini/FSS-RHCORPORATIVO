@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useCoreRh } from '../context/useCoreRh';
-import { apiFetch, fetchDocumentBlob } from '../services/api';
+import { apiFetch, fetchContractBlob, fetchDocumentBlob } from '../services/api';
 import type { DocumentoAdmissao, EtapaAdmissao, NovaAdmissao, TipoDocumento, UploadProgress } from '../types/coreRh';
 
 const stages: { key: EtapaAdmissao; title: string; hint: string; color: string }[] = [
@@ -44,6 +44,7 @@ export default function AdmissaoDigital() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [contractMessage, setContractMessage] = useState('');
+  const [generatingContract, setGeneratingContract] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<NovaAdmissao>({ nomeCompleto: '', cpf: '', email: '' });
 
@@ -120,16 +121,25 @@ export default function AdmissaoDigital() {
 
   async function generateContract() {
     if (!selected) return;
+    setGeneratingContract(true);
     setContractMessage('');
     try {
-      const response = await apiFetch<{ token_publico: string; pinParaDemonstracao?: string }>(`/core/colaboradores/${selected.id}/contratos`, { method: 'POST' });
+      const response = await apiFetch<{ id: number; token_publico: string; pinParaDemonstracao?: string }>(`/core/colaboradores/${selected.id}/contratos`, { method: 'POST' });
+      const url = URL.createObjectURL(await fetchContractBlob(Number(response.id)));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `contrato-${selected.nomeCompleto.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
       setContractMessage(response.pinParaDemonstracao
-        ? `Contrato enfileirado. PIN de demonstração: ${response.pinParaDemonstracao}`
-        : 'Contrato gerado e enviado para a fila de e-mails.');
+        ? `Contrato em PDF baixado. PIN de demonstração: ${response.pinParaDemonstracao}`
+        : 'Contrato em PDF baixado e enviado para a fila de e-mails.');
       await refreshAdmissions();
     } catch (contractError) {
       setActionError(contractError instanceof Error ? contractError.message : 'Falha ao gerar contrato.');
-    }
+    } finally { setGeneratingContract(false); }
   }
 
   return (
@@ -215,7 +225,7 @@ export default function AdmissaoDigital() {
               ))}
               {!selected.documentos?.length && <div className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-400">Os documentos enviados aparecerão aqui.</div>}
             </div>
-            {selected.etapaAdmissao === 'INTEGRACAO_SISTEMICA' && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-sm font-semibold text-emerald-900">Dossiê aprovado para integração</p><p className="mt-1 text-xs text-emerald-700">Gere o PDF, enfileire o e-mail e crie o PIN temporário de assinatura.</p><button type="button" onClick={() => void generateContract()} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white">Gerar contrato e token</button>{contractMessage && <p className="mt-2 text-xs font-medium text-emerald-800">{contractMessage}</p>}</div>}
+            {selected.etapaAdmissao === 'INTEGRACAO_SISTEMICA' && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-sm font-semibold text-emerald-900">Dossiê aprovado para integração</p><p className="mt-1 text-xs text-emerald-700">Gere e baixe o contrato em PDF, enfileire o e-mail e crie o PIN temporário de assinatura.</p><button type="button" disabled={generatingContract} onClick={() => void generateContract()} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white disabled:cursor-wait disabled:opacity-60">{generatingContract ? 'Gerando PDF...' : 'Gerar e baixar contrato PDF'}</button>{contractMessage && <p className="mt-2 text-xs font-medium text-emerald-800">{contractMessage}</p>}</div>}
           </div>
         </section>
       )}

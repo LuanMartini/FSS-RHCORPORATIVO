@@ -26,6 +26,8 @@ import {
   httpMetricsMiddleware, httpRequestLogMiddleware, metricsAccessMiddleware, prometheusMetrics,
   recordError, requestIdMiddleware,
 } from './observability/metrics.js';
+import { assertIcpBrasilConfiguration } from './security/icpBrasilSigner.ts';
+import { assertEsocialTransmissionConfiguration } from './payroll/esocial/esocialClient.ts';
 
 const env = getEnv();
 
@@ -92,6 +94,8 @@ export function createApp() {
 export async function start() {
   await initializeErrorTracking();
   installProcessErrorHandlers();
+  await assertIcpBrasilConfiguration();
+  await assertEsocialTransmissionConfiguration();
   await getPool();
   await assertSchemaCurrent();
   const app = createApp();
