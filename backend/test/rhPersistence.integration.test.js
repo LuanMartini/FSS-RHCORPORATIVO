@@ -12,6 +12,18 @@ if (enabled) process.env.NODE_ENV = 'test';
 const backendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const suffix = String(Date.now());
 
+function cpfFromSeed(seed) {
+  const digits = String(seed).replace(/[^0-9]/g, '').slice(-9).padStart(9, '0').split('').map(Number);
+  const checksum = (values) => {
+    const sum = values.reduce((total, digit, index) => total + digit * (values.length + 1 - index), 0);
+    const remainder = sum % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+  const first = checksum(digits);
+  const second = checksum([...digits, first]);
+  return [...digits, first, second].join('');
+}
+
 async function startServer() {
   const { createApp } = await import('../src/server.js');
   const server = http.createServer(createApp());
@@ -86,22 +98,14 @@ test('fluxo departamento -> funcionario -> periodos -> ferias persiste apos rein
 
     // 2/3. Cadastro de funcionario associado ao departamento
     const email = `persist-${suffix}@example.invalid`;
+    const cpf = cpfFromSeed(suffix);
     const admitted = await api('POST', '/rh/admitir', {
-      nome: 'Funcionario Persistencia', cpf: `52998224725`, email,
+      nome: 'Funcionario Persistencia', cpf, email,
       cargoId: created.cargo, departamentoId: created.departamento, salario: 3200,
       dataAdmissao: '2022-03-01',
-    }).catch((e) => ({ status: 0, text: String(e) }));
-    if (admitted.status === 409) {
-      await all('DELETE FROM colaboradores WHERE cpf=? RETURNING id', ['52998224725']);
-    }
-    const retry = admitted.status === 409
-      ? await api('POST', '/rh/admitir', {
-          nome: 'Funcionario Persistencia', cpf: `52998224725`, email,
-          cargoId: created.cargo, departamentoId: created.departamento, salario: 3200, dataAdmissao: '2022-03-01',
-        })
-      : admitted;
-    assert.equal(retry.status, 201, retry.text);
-    created.colaborador = Number(retry.json.colaboradorId);
+    });
+    assert.equal(admitted.status, 201, admitted.text);
+    created.colaborador = Number(admitted.json.colaboradorId);
 
     // 4. Periodos aquisitivos gerados pela trigger
     const periods = await all(

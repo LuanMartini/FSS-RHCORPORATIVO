@@ -5,52 +5,93 @@ Sistema de RH corporativo com autenticação, dashboard, funcionários, admissã
 ## Stack
 
 - Frontend: React, TypeScript, Vite e Tailwind CSS.
-- Backend: Node.js, Express, JWT, bcrypt e banco PostgreSQL ou MySQL.
+- Backend: Node.js, Express, JWT, bcrypt e PostgreSQL. As migrações e os módulos atuais exigem PostgreSQL.
 - Qualidade: lint, build, testes automatizados do backend e CI via GitHub Actions.
 
-## Como rodar
+## Requisitos
 
-1. Instale as dependências:
+- Node.js e npm.
+- PostgreSQL local ou Docker Desktop com Docker Compose.
 
-```bash
-npm install
-npm --prefix backend install
-npm --prefix frontend install
+## Configurar e executar
+
+Instale as dependências usando os lockfiles:
+
+```powershell
+npm ci
+npm --prefix backend ci
+npm --prefix frontend ci
 ```
 
-2. Configure o banco:
+Configure os arquivos locais:
 
-Crie um banco chamado `rhcorp` no PostgreSQL, ou copie `backend/.env.example` para `backend/.env` e ajuste as variáveis.
-
-Se tiver Docker instalado, suba um PostgreSQL local com:
-
-```bash
-docker compose up -d
+```powershell
+Copy-Item .env.example .env
+Copy-Item backend/.env.example backend/.env
 ```
 
-3. Aplique as migracoes e, apenas no primeiro ambiente de desenvolvimento,
-execute o seed explicitamente:
+Edite os dois arquivos. Para usar Docker Compose, mantenha POSTGRES_DB,
+POSTGRES_USER e POSTGRES_PASSWORD do .env da raiz iguais a PG_DATABASE, PG_USER
+e PG_PASSWORD de backend/.env. PG_PORT deve corresponder a
+RHCORP_POSTGRES_PORT. Troque também JWT_SECRET e defina SEED_ADMIN_PASSWORD
+antes de criar o administrador inicial. Os arquivos .env são locais e ignorados
+pelo Git.
 
-```bash
+Com Docker Desktop aberto, inicie os serviços:
+
+```powershell
+docker compose up -d postgres redis
+```
+
+Se já tiver PostgreSQL local, crie o banco indicado por PG_DATABASE e configure
+backend/.env. Nesse caso, o .env da raiz e o Docker Compose não são necessários.
+
+Aplique as migrações. No primeiro ambiente, crie também os dados de demonstração:
+
+```powershell
 npm --prefix backend run db:migrate
 npm --prefix backend run db:seed
 ```
 
-4. Rode tudo pela raiz:
+Inicie a API, o worker da folha e o frontend juntos:
 
-```bash
+```powershell
 npm run dev
 ```
 
-Frontend: http://localhost:5173
+O frontend abre em http://localhost:5173 e a API em http://localhost:3333. A
+verificação de saúde da API fica em http://localhost:3333/health. Para iniciar
+componentes separados, use terminais distintos:
 
-API: http://localhost:3333
+```powershell
+npm --prefix backend run dev
+npm --prefix frontend run dev
+```
+
+## Verificações
+
+Rode lint, verificação de tipos, testes e build:
+
+```powershell
+npm run check
+```
+
+Os testes que usam banco são opcionais no comando padrão. Com PostgreSQL
+migrado e um administrador de seed disponível, ative-os assim:
+
+```powershell
+$env:RUN_DB_INTEGRATION = '1'
+npm --prefix backend test
+Remove-Item Env:RUN_DB_INTEGRATION
+```
+
+No macOS ou Linux, use RUN_DB_INTEGRATION=1 npm --prefix backend test.
 
 ## Acesso inicial
 
 O backend não executa migrações nem seed durante o startup. O comando explícito
 `npm --prefix backend run db:seed` cria dados iniciais quando as tabelas estão
-vazias; em produção, configure uma senha forte antes de executá-lo.
+vazias. Configure uma senha forte em SEED_ADMIN_PASSWORD antes de executá-lo.
 
 - E-mail: definido por `SEED_ADMIN_EMAIL`.
 - Senha: obrigatoriamente definida por `SEED_ADMIN_PASSWORD` em producao.
