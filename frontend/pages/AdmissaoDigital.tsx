@@ -1,5 +1,8 @@
-import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useCoreRh } from '../context/useCoreRh';
+import { useAuth } from '../context/useAuth';
+import Icon from '../components/Icon';
+import { Feedback, Loading, PageHeading, SubmitForm, TableRegion } from '../components/ui';
 import { apiFetch, fetchContractBlob, fetchDocumentBlob } from '../services/api';
 import type { DocumentoAdmissao, EtapaAdmissao, NovaAdmissao, TipoDocumento, UploadProgress } from '../types/coreRh';
 
@@ -30,10 +33,13 @@ function statusStyle(status: DocumentoAdmissao['statusValidacao']) {
   return 'bg-amber-50 text-amber-700 border-amber-200';
 }
 
-export default function AdmissaoDigital() {
+export default function AdmissaoDigital({ onCreated }: { onCreated: () => void | Promise<void> }) {
+  const permissions = useAuth().user?.permissoes ?? [];
+  const canWrite = permissions.includes('onboarding.write');
+  const canReview = permissions.includes('onboarding.document.review');
   const {
     admissions, selected, loading, error, selectAdmission, createAdmission,
-    uploadDocument, reviewDocument, refreshAdmissions,
+    uploadDocument, reviewDocument, refreshAdmissions, organization, loadingOrganization,
   } = useCoreRh();
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -42,11 +48,23 @@ export default function AdmissaoDigital() {
   const [actionError, setActionError] = useState('');
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [search, setSearch] = useState('');
+  const [notice, setNotice] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [contractMessage, setContractMessage] = useState('');
   const [generatingContract, setGeneratingContract] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const previewDialog = useRef<HTMLDialogElement>(null);
   const [form, setForm] = useState<NovaAdmissao>({ nomeCompleto: '', cpf: '', email: '' });
+  const departments = [...new Map(organization.map((item) => [item.departamentoId, item.departamentoNome]))];
+  const jobs = organization.filter((item) => !form.departamentoId || item.departamentoId === form.departamentoId);
+
+  useEffect(() => {
+    if (!preview) return;
+    previewDialog.current?.showModal();
+    return () => URL.revokeObjectURL(preview.url);
+  }, [preview]);
 
   const metrics = useMemo(() => ({
     active: admissions.filter((item) => item.etapaAdmissao !== 'CONCLUIDA').length,
@@ -70,10 +88,11 @@ export default function AdmissaoDigital() {
   }
 
   async function sendAll() {
-    if (!selected) { setActionError('Selecione uma admissão antes de enviar documentos.'); return; }
+    if (!selected || uploading || !canWrite) return;
     setActionError('');
-    await Promise.all(uploads.map(async (item, index) => {
-      if (item.status === 'ERRO' || item.status === 'CONCLUIDO') return;
+    setUploading(true);
+    try { await Promise.all(uploads.map(async (item, index) => {
+      if (item.status !== 'AGUARDANDO') return;
       updateUpload(index, { status: 'ENVIANDO', progress: 1 });
       try {
         await uploadDocument(selected.id, item.file, item.type, (progress) => updateUpload(index, { progress }));
@@ -81,13 +100,12 @@ export default function AdmissaoDigital() {
       } catch (uploadError) {
         updateUpload(index, { status: 'ERRO', error: uploadError instanceof Error ? uploadError.message : 'Falha no upload.' });
       }
-    }));
+    })); } finally { setUploading(false); }
   }
 
   async function openPreview(document: DocumentoAdmissao) {
     setActionError('');
     try {
-      if (preview) URL.revokeObjectURL(preview.url);
       const url = URL.createObjectURL(await fetchDocumentBlob(document.id));
       setPreview({ url, name: document.nomeOriginal });
     } catch (previewError) {
@@ -108,12 +126,16 @@ export default function AdmissaoDigital() {
 
   async function submitAdmission(event: FormEvent) {
     event.preventDefault();
+    if (!canWrite) return;
     setSaving(true);
     setActionError('');
+    setNotice('');
     try {
       await createAdmission(form);
       setForm({ nomeCompleto: '', cpf: '', email: '' });
       setShowForm(false);
+      setNotice('Pré-admissão criada. Você pode enviar os documentos no dossiê.');
+      void onCreated();
     } catch (createError) {
       setActionError(createError instanceof Error ? createError.message : 'Falha ao criar admissão.');
     } finally { setSaving(false); }
@@ -143,27 +165,32 @@ export default function AdmissaoDigital() {
   }
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-sky-700">People operations</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Admissão digital</h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500">Acompanhe documentos, OCR, validação e assinatura em uma única trilha auditável.</p>
-        </div>
-        <button type="button" onClick={() => setShowForm((value) => !value)} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800">
-          {showForm ? 'Fechar cadastro' : '+ Nova pré-admissão'}
-        </button>
-      </header>
+    <div className="page-stack">
+      <PageHeading title="Admissão digital" description="Acompanhe cada cadastro do recebimento de documentos à assinatura do contrato."
+        action={canWrite && <button type="button" aria-expanded={showForm} onClick={() => setShowForm((value) => !value)} className="ui-button"><Icon name="userPlus" size={17} />{showForm ? 'Fechar cadastro' : 'Nova pré-admissão'}</button>} />
 
-      {(error || actionError) && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError || error}</div>}
+      {error && <Feedback retry={refreshAdmissions}>{error}</Feedback>}
+      {actionError && <Feedback>{actionError}</Feedback>}
+      {notice && <Feedback kind="success">{notice}</Feedback>}
 
-      {showForm && (
-        <form onSubmit={submitAdmission} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-4">
-          <input required placeholder="Nome completo" value={form.nomeCompleto} onChange={(event) => setForm({ ...form, nomeCompleto: event.target.value })} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-          <input required placeholder="CPF" value={form.cpf} onChange={(event) => setForm({ ...form, cpf: event.target.value })} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-          <input required type="email" placeholder="E-mail" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-          <button disabled={saving} className="rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Criando...' : 'Criar admissão'}</button>
-        </form>
+      {canWrite && showForm && (
+        <SubmitForm submit={submitAdmission} className="panel form-panel" aria-busy={saving}>
+          <h2>Dados pessoais</h2>
+          <div className="form-grid">
+            <label className="form-label">Nome completo *<input required autoComplete="name" value={form.nomeCompleto} onChange={(event) => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
+            <label className="form-label">CPF *<input required inputMode="numeric" value={form.cpf} onChange={(event) => setForm({ ...form, cpf: event.target.value })} /></label>
+            <label className="form-label">E-mail *<input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+            <label className="form-label">Telefone<input type="tel" autoComplete="tel" value={form.telefone ?? ''} onChange={(event) => setForm({ ...form, telefone: event.target.value || undefined })} /></label>
+          </div>
+          <h2>Dados profissionais</h2>
+          <div className="form-grid">
+            {departments.length > 0 && <><label className="form-label">Departamento<select disabled={loadingOrganization} value={form.departamentoId ?? ''} onChange={(event) => setForm({ ...form, departamentoId: Number(event.target.value) || undefined, cargoId: undefined })}><option value="">A definir</option>{departments.map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label>
+              <label className="form-label">Cargo<select disabled={loadingOrganization} value={form.cargoId ?? ''} onChange={(event) => { const job = jobs.find((item) => item.id === Number(event.target.value)); setForm({ ...form, cargoId: job?.id, departamentoId: job?.departamentoId ?? form.departamentoId }); }}><option value="">A definir</option>{jobs.map((item) => <option value={item.id} key={item.id}>{item.nome}</option>)}</select></label></>}
+            <label className="form-label">Data de admissão<input type="date" value={form.dataAdmissao ?? ''} onChange={(event) => setForm({ ...form, dataAdmissao: event.target.value || undefined })} /></label>
+            <label className="form-label">Salário (R$)<input type="number" min="0" step="0.01" value={form.salario ?? ''} onChange={(event) => setForm({ ...form, salario: event.target.value ? Number(event.target.value) : undefined })} /></label>
+          </div>
+          <button className="ui-button" disabled={saving}>{saving ? 'Criando…' : 'Criar admissão'}</button>
+        </SubmitForm>
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -172,16 +199,18 @@ export default function AdmissaoDigital() {
         ))}
       </section>
 
-      <section className="overflow-x-auto pb-2">
+      <label className="form-label max-w-sm">Buscar admissão<input value={search} type="search" onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou e-mail" /></label>
+      {loading && !admissions.length ? <Loading label="Carregando admissões" /> : !error && <TableRegion label="Etapas da admissão">
         <div className="grid min-w-[1040px] grid-cols-4 gap-4">
           {stages.map((stage) => {
-            const items = admissions.filter((item) => item.etapaAdmissao === stage.key || (stage.key === 'INTEGRACAO_SISTEMICA' && item.etapaAdmissao === 'CONCLUIDA'));
+            const items = admissions.filter((item) => (item.etapaAdmissao === stage.key || (stage.key === 'INTEGRACAO_SISTEMICA' && item.etapaAdmissao === 'CONCLUIDA'))
+              && `${item.nomeCompleto} ${item.email}`.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR')));
             return (
               <div key={stage.key} className="rounded-2xl border border-slate-200 bg-slate-100/70 p-3">
                 <div className="mb-3 flex items-center gap-3 px-1"><span className={`h-2.5 w-2.5 rounded-full ${stage.color}`} /><div><h2 className="text-sm font-semibold text-slate-800">{stage.title}</h2><p className="text-[11px] text-slate-500">{stage.hint} · {items.length}</p></div></div>
                 <div className="space-y-2">
                   {items.map((item) => (
-                    <button key={item.id} type="button" onClick={() => void selectAdmission(item.id)} className={`w-full rounded-xl border bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected?.id === item.id ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200'}`}>
+                    <button key={item.id} type="button" disabled={uploading} onClick={() => { if (item.id !== selected?.id) { setUploads([]); setReviewing(null); setContractMessage(''); } void selectAdmission(item.id); }} className={`w-full rounded-xl border bg-white p-3 text-left shadow-sm transition hover:shadow-md ${selected?.id === item.id ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200'}`}>
                       <div className="flex items-start justify-between gap-2"><p className="text-sm font-semibold text-slate-900">{item.nomeCompleto}</p>{item.etapaAdmissao === 'CONCLUIDA' && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">ATIVO</span>}</div>
                       <p className="mt-1 truncate text-xs text-slate-500">{item.cargoNome || 'Cargo a definir'}</p>
                       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-sky-500" style={{ width: `${Math.min(100, item.documentosAprovados * 20)}%` }} /></div>
@@ -194,22 +223,22 @@ export default function AdmissaoDigital() {
             );
           })}
         </div>
-      </section>
+      </TableRegion>}
 
       {selected && (
         <section className="grid gap-5 xl:grid-cols-[0.9fr_1.4fr]">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-sky-700">Dossiê #{selected.id}</p><h2 className="mt-1 text-xl font-semibold text-slate-950">{selected.nomeCompleto}</h2><p className="text-sm text-slate-500">{selected.email}</p></div><button type="button" onClick={() => void selectAdmission(null)} className="text-slate-400 hover:text-slate-700">✕</button></div>
+            <div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-sky-700">Dossiê #{selected.id}</p><h2 className="mt-1 text-xl font-semibold text-slate-950">{selected.nomeCompleto}</h2><p className="text-sm text-slate-500">{selected.email}</p></div><button type="button" disabled={uploading} aria-label="Fechar dossiê" onClick={() => { setUploads([]); void selectAdmission(null); }} className="text-slate-400 hover:text-slate-700">✕</button></div>
             <div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-400">CPF</p><p className="mt-1 font-medium">{selected.cpf}</p></div><div className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-400">Etapa</p><p className="mt-1 font-medium">{selected.etapaAdmissao.replaceAll('_', ' ')}</p></div></div>
 
-            <div onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); queueFiles(event.dataTransfer.files); }} className={`mt-5 rounded-2xl border-2 border-dashed p-6 text-center transition ${dragging ? 'border-sky-500 bg-sky-50' : 'border-slate-200 bg-slate-50'}`}>
+            {canWrite && <div onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); queueFiles(event.dataTransfer.files); }} className={`mt-5 rounded-2xl border-2 border-dashed p-6 text-center transition ${dragging ? 'border-sky-500 bg-sky-50' : 'border-slate-200 bg-slate-50'}`}>
               <input ref={fileInput} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(event: ChangeEvent<HTMLInputElement>) => event.target.files && queueFiles(event.target.files)} />
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-white text-xl shadow-sm">⇧</div><p className="mt-3 text-sm font-semibold text-slate-800">Arraste RG, CPF, PIS, comprovante e diploma</p><p className="mt-1 text-xs text-slate-400">PDF, JPG ou PNG · máximo 10 MB por arquivo</p>
               <button type="button" onClick={() => fileInput.current?.click()} className="mt-3 text-xs font-semibold text-sky-700 hover:text-sky-900">Selecionar arquivos</button>
-            </div>
+            </div>}
 
-            {uploads.length > 0 && <div className="mt-4 space-y-3">{uploads.map((item, index) => <div key={`${item.file.name}-${item.file.lastModified}`} className="rounded-xl border border-slate-200 p-3"><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-700">{item.file.name}</p><select value={item.type} disabled={item.status === 'ENVIANDO'} onChange={(event) => updateUpload(index, { type: event.target.value as TipoDocumento })} className="mt-1 max-w-full bg-transparent text-[11px] text-slate-500">{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><span className="text-xs font-semibold text-slate-500">{item.progress}%</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full transition-all ${item.status === 'ERRO' ? 'bg-red-500' : item.status === 'CONCLUIDO' ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${item.status === 'ERRO' ? 100 : item.progress}%` }} /></div>{item.error && <p className="mt-1 text-[11px] text-red-600">{item.error}</p>}</div>)}</div>}
-            {uploads.some((item) => item.status === 'AGUARDANDO') && <button type="button" onClick={() => void sendAll()} className="mt-4 w-full rounded-xl bg-sky-700 py-2.5 text-sm font-semibold text-white hover:bg-sky-800">Criptografar e enviar lote</button>}
+            {canWrite && uploads.length > 0 && <div className="mt-4 space-y-3">{uploads.map((item, index) => <div key={`${item.file.name}-${item.file.lastModified}`} className="rounded-xl border border-slate-200 p-3"><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-700">{item.file.name}</p><select aria-label={"Tipo de documento de " + item.file.name} value={item.type} disabled={item.status === 'ENVIANDO'} onChange={(event) => updateUpload(index, { type: event.target.value as TipoDocumento })} className="mt-1 max-w-full bg-transparent text-[11px] text-slate-500">{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><span className="text-xs font-semibold text-slate-500">{item.progress}%</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full transition-all ${item.status === 'ERRO' ? 'bg-red-500' : item.status === 'CONCLUIDO' ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${item.status === 'ERRO' ? 100 : item.progress}%` }} /></div>{item.error && <p className="mt-1 text-[11px] text-red-600">{item.error}</p>}</div>)}</div>}
+            {canWrite && uploads.some((item) => item.status === 'AGUARDANDO') && <button type="button" disabled={uploading} onClick={() => void sendAll()} className="mt-4 w-full rounded-xl bg-sky-700 py-2.5 text-sm font-semibold text-white hover:bg-sky-800">Criptografar e enviar lote</button>}
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -217,20 +246,20 @@ export default function AdmissaoDigital() {
             <div className="mt-4 space-y-3">
               {selected.documentos?.map((document) => (
                 <article key={document.id} className="rounded-2xl border border-slate-200 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="text-sm font-semibold text-slate-900">{typeLabels[document.tipo]}</p><span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusStyle(document.statusValidacao)}`}>{document.statusValidacao}</span></div><p className="mt-1 text-xs text-slate-400">{document.nomeOriginal} · {(document.tamanhoBytes / 1024).toFixed(0)} KB</p></div><button type="button" onClick={() => void openPreview(document)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Visualizar</button></div>
+                  <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="text-sm font-semibold text-slate-900">{typeLabels[document.tipo]}</p><span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusStyle(document.statusValidacao)}`}>{document.statusValidacao}</span></div><p className="mt-1 text-xs text-slate-400">{document.nomeOriginal} · {(document.tamanhoBytes / 1024).toFixed(0)} KB</p></div>{canReview && <button type="button" onClick={() => void openPreview(document)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Visualizar</button>}</div>
                   <div className="mt-3 grid gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2">{Object.entries(document.metadadosOcr).map(([key, value]) => <div key={key}><p className="text-[10px] uppercase tracking-wide text-slate-400">{key.replaceAll('_', ' ')}</p><p className="truncate text-xs font-medium text-slate-700">{value}</p></div>)}<div><p className="text-[10px] uppercase tracking-wide text-slate-400">Confiança OCR</p><p className="text-xs font-semibold text-sky-700">{document.confiancaOcr.toFixed(1)}%</p></div></div>
-                  {document.statusValidacao === 'PENDENTE' && <div className="mt-3">{reviewing === document.id ? <div className="space-y-2"><textarea value={justification} onChange={(event) => setJustification(event.target.value)} placeholder="Justificativa obrigatória para recusa" className="w-full rounded-xl border border-slate-200 p-3 text-sm" /><div className="flex gap-2"><button type="button" onClick={() => void decide(document.id, 'RECUSADO')} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white">Confirmar recusa</button><button type="button" onClick={() => setReviewing(null)} className="rounded-lg border px-3 py-2 text-xs">Cancelar</button></div></div> : <div className="flex gap-2"><button type="button" onClick={() => void decide(document.id, 'APROVADO')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprovar</button><button type="button" onClick={() => setReviewing(document.id)} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700">Recusar</button></div>}</div>}
+                  {canReview && document.statusValidacao === 'PENDENTE' && <div className="mt-3">{reviewing === document.id ? <div className="space-y-2"><textarea aria-label="Justificativa da recusa" value={justification} onChange={(event) => setJustification(event.target.value)} placeholder="Justificativa obrigatória para recusa" className="w-full rounded-xl border border-slate-200 p-3 text-sm" /><div className="flex gap-2"><button type="button" disabled={!justification.trim()} onClick={() => void decide(document.id, 'RECUSADO')} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white">Confirmar recusa</button><button type="button" onClick={() => setReviewing(null)} className="rounded-lg border px-3 py-2 text-xs">Cancelar</button></div></div> : <div className="flex gap-2"><button type="button" onClick={() => void decide(document.id, 'APROVADO')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprovar</button><button type="button" onClick={() => setReviewing(document.id)} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700">Recusar</button></div>}</div>}
                   {document.justificativa && <p className="mt-2 text-xs text-red-600">Justificativa: {document.justificativa}</p>}
                 </article>
               ))}
               {!selected.documentos?.length && <div className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-400">Os documentos enviados aparecerão aqui.</div>}
             </div>
-            {selected.etapaAdmissao === 'INTEGRACAO_SISTEMICA' && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-sm font-semibold text-emerald-900">Dossiê aprovado para integração</p><p className="mt-1 text-xs text-emerald-700">Gere e baixe o contrato em PDF, enfileire o e-mail e crie o PIN temporário de assinatura.</p><button type="button" disabled={generatingContract} onClick={() => void generateContract()} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white disabled:cursor-wait disabled:opacity-60">{generatingContract ? 'Gerando PDF...' : 'Gerar e baixar contrato PDF'}</button>{contractMessage && <p className="mt-2 text-xs font-medium text-emerald-800">{contractMessage}</p>}</div>}
+            {canWrite && selected.etapaAdmissao === 'INTEGRACAO_SISTEMICA' && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-sm font-semibold text-emerald-900">Dossiê aprovado para integração</p><p className="mt-1 text-xs text-emerald-700">Gere e baixe o contrato em PDF, enfileire o e-mail e crie o PIN temporário de assinatura.</p><button type="button" disabled={generatingContract} onClick={() => void generateContract()} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white disabled:cursor-wait disabled:opacity-60">{generatingContract ? 'Gerando PDF...' : 'Gerar e baixar contrato PDF'}</button>{contractMessage && <p className="mt-2 text-xs font-medium text-emerald-800">{contractMessage}</p>}</div>}
           </div>
         </section>
       )}
 
-      {preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true"><div className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-3"><p className="truncate text-sm font-semibold">{preview.name}</p><button type="button" onClick={() => { URL.revokeObjectURL(preview.url); setPreview(null); }} className="rounded-lg px-3 py-1 text-slate-500 hover:bg-slate-100">Fechar</button></div><iframe title={preview.name} src={preview.url} className="h-full w-full bg-slate-100" /></div></div>}
+      <dialog ref={previewDialog} className="ui-dialog document-preview" aria-labelledby="preview-title" onClose={() => setPreview(null)}>{preview && <><header><h2 id="preview-title">{preview.name}</h2><button type="button" className="ui-button ui-button--secondary" onClick={() => previewDialog.current?.close()}>Fechar</button></header><iframe title={preview.name} src={preview.url} /></>}</dialog>
     </div>
   );
 }

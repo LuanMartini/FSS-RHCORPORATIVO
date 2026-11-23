@@ -1,3 +1,5 @@
+import { useAuth } from '../context/useAuth';
+import { Feedback, Loading, PageHeading } from '../components/ui';
 import {
   useCallback,
   useEffect,
@@ -128,18 +130,18 @@ function TalentCard({
   onDragStart,
 }: {
   talent: TalentResult;
-  onDragStart: (talent: TalentResult) => void;
+  onDragStart?: (talent: TalentResult) => void;
 }) {
   const calibrated =
     talent.desempenho_calibrado !== null &&
     talent.desempenho_calibrado !== undefined;
   return (
     <article
-      draggable
+      draggable={Boolean(onDragStart)}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", String(talent.resultado_id));
-        onDragStart(talent);
+        onDragStart?.(talent);
       }}
       className="group relative cursor-grab rounded-xl border border-white/80 bg-white p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing"
     >
@@ -216,7 +218,7 @@ function OkrTree({
   onEdit,
 }: {
   items: OkrItem[];
-  onEdit: (item: OkrItem) => void;
+  onEdit?: (item: OkrItem) => void;
 }) {
   const children = useMemo(() => {
     const map = new Map<number | null, OkrItem[]>();
@@ -257,7 +259,7 @@ function OkrTree({
               {item.titulo}
             </p>
           </div>
-          {leaf && (
+          {onEdit && leaf && (
             <button
               type="button"
               onClick={() => onEdit(item)}
@@ -321,6 +323,7 @@ function CalibrationHistory({ items }: { items: CalibrationLog[] }) {
 }
 
 export default function GestaoDesempenho() {
+  const canManage = useAuth().user?.permissoes.includes('performance.manage');
   const [data, setData] = useState<PerformanceDashboard | null>(null);
   const [cycleId, setCycleId] = useState<number | null>(null);
   const [departmentId, setDepartmentId] = useState<number | null>(null);
@@ -445,30 +448,13 @@ export default function GestaoDesempenho() {
       setSaving(false);
     }
   };
-  if (loading && !data)
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center text-sm text-slate-500">
-        Construindo matriz de talentos…
-      </div>
-    );
+  if (!data) return <div className="page-stack"><PageHeading title="Desempenho e sucessão" />{loading ? <Loading label="Carregando desempenho" /> : <Feedback retry={() => void load()}>{error || "Não foi possível carregar o desempenho."}</Feedback>}</div>;
   return (
     <div className="mx-auto max-w-[1600px] space-y-5">
-      <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[.22em] text-teal-600">
-            People Analytics · Talent Intelligence
-          </p>
-          <h1 className="mt-1 font-serif text-3xl font-semibold text-[#102f4a]">
-            Desempenho & Sucessão
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Avaliação 360, calibração colegiada e OKRs conectados em uma única
-            leitura.
-          </p>
-        </div>
+      <div className="module-heading-with-actions"><PageHeading title="Desempenho e sucessão" description="Consulte avaliações, metas e o planejamento de sucessão." />
         <div className="flex flex-wrap gap-2">
           <select
-            value={cycleId ?? ""}
+            aria-label="Ciclo de avaliação" value={cycleId ?? ""}
             onChange={(e) => setCycleId(Number(e.target.value))}
             className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 shadow-sm"
           >
@@ -479,7 +465,7 @@ export default function GestaoDesempenho() {
             ))}
           </select>
           <select
-            value={departmentId ?? ""}
+            aria-label="Departamento" value={departmentId ?? ""}
             onChange={(e) =>
               setDepartmentId(e.target.value ? Number(e.target.value) : null)
             }
@@ -492,16 +478,16 @@ export default function GestaoDesempenho() {
               </option>
             ))}
           </select>
-          <button
+          {canManage && <button
             type="button"
             onClick={() => void recalculate()}
             disabled={saving}
-            className="rounded-xl bg-[#102f4a] px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-[#173f61] disabled:opacity-50"
+            className="ui-button"
           >
             Recalcular 360
-          </button>
+          </button>}
         </div>
-      </header>
+      </div>
       {(error || notice) && (
         <div
           className={`flex items-center justify-between rounded-xl border px-4 py-3 text-xs ${error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-teal-200 bg-teal-50 text-teal-700"}`}
@@ -616,7 +602,7 @@ export default function GestaoDesempenho() {
                         <TalentCard
                           key={talent.resultado_id}
                           talent={talent}
-                          onDragStart={setDragged}
+                          onDragStart={canManage ? setDragged : undefined}
                         />
                       ))}
                     </div>
@@ -642,10 +628,10 @@ export default function GestaoDesempenho() {
             </div>
             <OkrTree
               items={data?.okrs ?? []}
-              onEdit={(item) => {
+              onEdit={canManage ? (item) => {
                 setOkrEdit(item);
                 setOkrValue(String(item.valor_atual));
-              }}
+              } : undefined}
             />
           </section>
           <section className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -791,7 +777,7 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl"
+        className="dialog-panel w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl"
       >
         <div className="flex items-center justify-between">
           <h2

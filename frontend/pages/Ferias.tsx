@@ -1,6 +1,8 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { apiFetch } from '../services/api';
 import type { FuncionarioView } from '../utils/funcionario';
+import { useAuth } from '../context/useAuth';
+import { EmptyState, Feedback, Loading, PageHeading, StatusBadge, SubmitForm, TableRegion } from '../components/ui';
 
 interface FeriasItem {
   id: number;
@@ -17,7 +19,15 @@ interface Props {
   onRefresh: () => void;
 }
 
+const statusLabels: Record<string, [string, 'success' | 'warning' | 'danger' | 'neutral']> = {
+  PENDENTE: ['Pendente', 'warning'], APROVADA: ['Aprovada', 'success'],
+  REPROVADA: ['Reprovada', 'danger'], EM_GOZO: ['Em gozo', 'success'], ENCERRADA: ['Encerrada', 'neutral'],
+};
+
+const dateLabel = (value: string) => value.slice(0, 10).split('-').reverse().join('/');
+
 export default function Ferias({ funcionarios, onRefresh }: Props) {
+  const canClose = useAuth().user?.permissoes.includes('time.manage.all');
   const ativos = funcionarios.filter(f => f.ativo);
   const [lista, setLista] = useState<FeriasItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,14 +38,19 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
     observacao: '',
   });
   const [erro, setErro] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState<number | null>(null);
 
   async function carregar() {
+    setLoadError('');
     try {
       const data = await apiFetch<FeriasItem[]>('/rh/ferias');
       setLista(data);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao listar férias');
+      setLoadError(e instanceof Error ? e.message : 'Erro ao listar férias');
     } finally {
       setLoading(false);
     }
@@ -45,30 +60,41 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
     carregar();
   }, []);
 
-  async function solicitar(e: FormEvent) {
+  async function solicitar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErro('');
+    setNotice('');
+    const fields = new FormData(e.currentTarget);
+    const dataInicio = String(fields.get('dataInicio') ?? '');
+    const dataFim = String(fields.get('dataFim') ?? '');
+    if (dataFim < dataInicio) {
+      setErro('A data final deve ser igual ou posterior à data inicial.');
+      return;
+    }
+    setSubmitting(true);
     try {
       await apiFetch('/rh/ferias', {
         method: 'POST',
         body: JSON.stringify({
           funcionarioId: Number(form.funcionarioId),
-          dataInicio: form.dataInicio,
-          dataFim: form.dataFim,
+          dataInicio,
+          dataFim,
           observacao: form.observacao || undefined,
         }),
       });
       setForm({ funcionarioId: '', dataInicio: '', dataFim: '', observacao: '' });
+      setNotice('Solicitação enviada.');
       await carregar();
       onRefresh();
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao solicitar');
-    }
+    } finally { setSubmitting(false); }
   }
 
   async function acao(id: number, tipo: 'aprovar' | 'reprovar' | 'encerrar') {
     setBusy(id);
     setErro('');
+    setNotice('');
     try {
       const path =
         tipo === 'aprovar' ? `/rh/ferias/${id}/aprovar`
@@ -77,6 +103,7 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
       const versao=lista.find((item)=>item.id===id)?.versao;
       const body = JSON.stringify({ ...(tipo === 'reprovar' ? { motivo: 'Reprovado pelo gestor' } : {}), versao });
       await apiFetch(path, { method: 'PATCH', body });
+      setNotice('Status da solicitação atualizado.');
       await carregar();
       onRefresh();
     } catch (e) {
@@ -86,18 +113,19 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
     }
   }
 
-  if (loading) return <p role="status" className="text-slate-500">Carregando...</p>;
+  const visible = lista.filter((row) => !filter || row.status === filter);
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      <h2 className="font-serif text-2xl text-[#0f2340]">Férias</h2>
-      {erro && <p role="alert" aria-live="assertive" className="text-red-700 text-sm">{erro}</p>}
+    <div className="page-stack">
+      <PageHeading title="Férias" description="Solicite férias e acompanhe as aprovações da sua equipe." />
+      {erro && <Feedback>{erro}</Feedback>}
+      {notice && <Feedback kind="success">{notice}</Feedback>}
 
-      <form onSubmit={solicitar} className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold text-slate-800">Nova solicitação</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-          <label htmlFor="ferias-funcionario" className="mb-1 block text-xs font-semibold text-slate-600">Funcionário</label>
+      <SubmitForm submit={solicitar} className="panel form-panel" aria-busy={submitting}>
+        <h2>Nova solicitação</h2>
+        <div className="form-grid">
+          <div className="form-label">
+          <label htmlFor="ferias-funcionario">Funcionário *</label>
           <select
             id="ferias-funcionario"
             required
@@ -110,28 +138,31 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
               <option key={f.id} value={f.id}>{f.nome}</option>
             ))}
           </select></div>
-          <div>
-          <label htmlFor="ferias-inicio" className="mb-1 block text-xs font-semibold text-slate-600">Início</label>
+          <div className="form-label">
+          <label htmlFor="ferias-inicio">Início *</label>
           <input
             id="ferias-inicio"
+            name="dataInicio"
             type="date"
             required
             value={form.dataInicio}
             onChange={e => setForm({ ...form, dataInicio: e.target.value })}
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
           /></div>
-          <div>
-          <label htmlFor="ferias-fim" className="mb-1 block text-xs font-semibold text-slate-600">Fim</label>
+          <div className="form-label">
+          <label htmlFor="ferias-fim">Fim *</label>
           <input
             id="ferias-fim"
+            name="dataFim"
             type="date"
+            min={form.dataInicio || undefined}
             required
             value={form.dataFim}
             onChange={e => setForm({ ...form, dataFim: e.target.value })}
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
           /></div>
-          <div className="md:col-span-2">
-          <label htmlFor="ferias-observacao" className="mb-1 block text-xs font-semibold text-slate-600">Observação (opcional)</label>
+          <div className="form-label field-wide">
+          <label htmlFor="ferias-observacao">Observação (opcional)</label>
           <input
             id="ferias-observacao"
             placeholder="Observação (opcional)"
@@ -140,12 +171,17 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
           /></div>
         </div>
-        <button type="submit" className="px-4 py-2 bg-[#0f2340] text-white rounded-lg text-sm font-semibold">
-          Enviar solicitação
+        <button type="submit" className="ui-button" disabled={submitting || !ativos.length}>
+          {submitting ? 'Enviando…' : 'Enviar solicitação'}
         </button>
-      </form>
+      </SubmitForm>
 
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <section className="panel">
+        <div className="panel-heading panel-heading--action"><h2>Solicitações de férias</h2>
+          {lista.length > 0 && <label className="form-label">Filtrar por status<select value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <option value="">Todos os status</option>{[...new Set(lista.map((row) => row.status))].map((status) => <option key={status} value={status}>{statusLabels[status]?.[0] ?? status}</option>)}
+          </select></label>}</div>
+        {loading ? <Loading label="Carregando férias" /> : loadError ? <Feedback retry={carregar}>{loadError}</Feedback> : visible.length === 0 ? <EmptyState title={filter ? 'Nenhuma solicitação com esse status' : 'Nenhuma solicitação de férias'} /> : <TableRegion label="Solicitações de férias">
         <table className="w-full text-sm">
           <caption className="sr-only">Solicitações de férias</caption>
           <thead className="bg-slate-50">
@@ -158,50 +194,50 @@ export default function Ferias({ funcionarios, onRefresh }: Props) {
             </tr>
           </thead>
           <tbody>
-            {lista.map(row => (
+            {visible.map(row => (
               <tr key={row.id} className="border-t border-slate-100">
                 <td className="px-4 py-2">{row.funcionario?.nome ?? `#${row.funcionarioId}`}</td>
-                <td className="px-4 py-2">{row.dataInicio}</td>
-                <td className="px-4 py-2">{row.dataFim}</td>
-                <td className="px-4 py-2">{row.status}</td>
-                <td className="px-4 py-2 space-x-2">
+                <td className="numeric">{dateLabel(row.dataInicio)}</td>
+                <td className="numeric">{dateLabel(row.dataFim)}</td>
+                <td><StatusBadge tone={statusLabels[row.status]?.[1]}>{statusLabels[row.status]?.[0] ?? row.status}</StatusBadge></td>
+                <td><div className="action-row">
                   {row.status === 'PENDENTE' && (
                     <>
                       <button
                         type="button"
-                        disabled={busy === row.id}
+                        disabled={busy !== null}
                         onClick={() => acao(row.id, 'aprovar')}
-                        className="text-emerald-700 text-xs font-semibold"
+                        className="ui-button ui-button--secondary ui-button--small"
                       >
                         Aprovar
                       </button>
                       <button
                         type="button"
-                        disabled={busy === row.id}
+                        disabled={busy !== null}
                         onClick={() => acao(row.id, 'reprovar')}
-                        className="text-red-600 text-xs font-semibold"
+                        className="ui-button ui-button--danger ui-button--small"
                       >
                         Reprovar
                       </button>
                     </>
                   )}
-                  {row.status === 'EM_GOZO' && (
+                  {row.status === 'EM_GOZO' && canClose && (
                     <button
                       type="button"
-                      disabled={busy === row.id}
+                      disabled={busy !== null}
                       onClick={() => acao(row.id, 'encerrar')}
-                      className="text-slate-700 text-xs font-semibold"
+                      className="ui-button ui-button--secondary ui-button--small"
                     >
                       Encerrar
                     </button>
                   )}
-                </td>
+                </div></td>
               </tr>
             ))}
           </tbody>
         </table>
-        {lista.length === 0 && <p role="status" className="p-6 text-slate-500 text-center">Nenhuma solicitação.</p>}
-      </div>
+        </TableRegion>}
+      </section>
     </div>
   );
 }

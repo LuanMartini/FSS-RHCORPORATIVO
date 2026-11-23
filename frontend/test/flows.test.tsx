@@ -13,8 +13,8 @@ vi.mock('../services/api', () => ({
     if (route.startsWith('/rh/folha/')) {
       return {
         funcionario: { id: 1, nome: 'Ana Silva', cpf: '000.000.000-00', cargo: 1 }, mesReferencia: 1, anoReferencia: 2026,
-        vencimentos: { salarioBase: '5.000,00' }, descontos: { inss: '500,00', irrf: '300,00' }, provisoes: { fgts: '400,00' },
-        totalBruto: '5.000,00', totalDescontos: '800,00', totalLiquido: '4.200,00',
+        vencimentos: { salarioBase: '5000.00' }, descontos: { inss: '500.00', irrf: '300.00' }, provisoes: { fgts: '400.00' },
+        totalBruto: '5000.00', totalDescontos: '800.00', totalLiquido: '4200.00',
       };
     }
     return [];
@@ -38,7 +38,7 @@ describe('fluxos prioritários da interface', () => {
   it('envia o login com as credenciais preenchidas', async () => {
     const view = render(<Login canRegister onSwitch={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(/e-mail/i), { target: { value: 'ana@example.test' } });
-    fireEvent.change(screen.getByLabelText(/senha/i), { target: { value: 'senha-de-teste' } });
+    fireEvent.change(screen.getByLabelText(/senha/i, { selector: 'input' }), { target: { value: 'senha-de-teste' } });
     fireEvent.click(screen.getByRole('button', { name: /entrar/i }));
     await waitFor(() => expect(apiFetchMock).toHaveBeenCalledWith('/login', expect.objectContaining({ method: 'POST' })));
     view.unmount();
@@ -57,11 +57,12 @@ describe('fluxos prioritários da interface', () => {
     fireEvent.change(screen.getByLabelText(/funcionário/i), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: /gerar/i }));
     expect(await screen.findByRole('heading', { name: /holerite gerado/i })).toBeTruthy();
+    expect(screen.getByText(/R\$\s4\.200,00/)).toBeTruthy();
     expect(apiFetchMock).toHaveBeenCalledWith('/rh/folha/1');
     payslipView.unmount();
 
     const vacationView = render(<Ferias funcionarios={funcionarios} onRefresh={vi.fn()} />);
-    await screen.findByRole('heading', { name: /férias/i });
+    await screen.findByRole('heading', { name: 'Férias', level: 1 });
     fireEvent.change(screen.getByLabelText(/funcionário/i), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText(/início/i), { target: { value: '2026-02-01' } });
     fireEvent.change(screen.getByLabelText(/fim/i), { target: { value: '2026-02-10' } });

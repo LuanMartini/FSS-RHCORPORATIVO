@@ -1,3 +1,5 @@
+import { EmptyState, Feedback, Loading, PageHeading, StatusBadge, SubmitForm, TableRegion } from '../components/ui';
+import { useAuth } from '../context/useAuth';
 import { useState, useEffect, type FormEvent } from 'react';
 import { apiFetch } from '../services/api';
 import type { FuncionarioView } from '../utils/funcionario';
@@ -23,6 +25,10 @@ interface Props {
 }
 
 export default function Advertencias({ funcionarios, onRefresh }: Props) {
+  const canWrite = useAuth().user?.permissoes.includes('employee.write');
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [lista, setLista] = useState<AdvertenciaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
@@ -34,11 +40,12 @@ export default function Advertencias({ funcionarios, onRefresh }: Props) {
   });
 
   async function carregar() {
+    setLoadError('');
     try {
       const data = await apiFetch<AdvertenciaRow[]>('/rh/advertencias');
       setLista(data);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao listar');
+      setLoadError(e instanceof Error ? e.message : 'Erro ao listar');
     } finally {
       setLoading(false);
     }
@@ -51,6 +58,8 @@ export default function Advertencias({ funcionarios, onRefresh }: Props) {
   async function registrar(e: FormEvent) {
     e.preventDefault();
     setErro('');
+    setNotice('');
+    setSaving(true);
     try {
       await apiFetch('/rh/advertencias', {
         method: 'POST',
@@ -62,83 +71,44 @@ export default function Advertencias({ funcionarios, onRefresh }: Props) {
         }),
       });
       setForm({ funcionarioId: '', tipo: 'VERBAL', descricao: '', dataOcorrencia: '' });
+      setNotice('Advertência registrada.');
       await carregar();
       onRefresh();
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao registrar');
-    }
+    } finally { setSaving(false); }
   }
 
-  if (loading) return <p className="text-slate-500">Carregando...</p>;
-
-  return (
-    <div className="space-y-8 max-w-4xl">
-      <h2 className="font-serif text-2xl text-[#0f2340]">Advertências</h2>
-      {erro && <p className="text-red-600 text-sm">{erro}</p>}
-
-      <form onSubmit={registrar} className="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold">Registrar</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <select
-            required
-            value={form.funcionarioId}
-            onChange={e => setForm({ ...form, funcionarioId: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="">Funcionário</option>
-            {funcionarios.map(f => (
-              <option key={f.id} value={f.id}>{f.nome}</option>
-            ))}
-          </select>
-          <select
-            value={form.tipo}
-            onChange={e => setForm({ ...form, tipo: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            {TIPOS.map(t => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={form.dataOcorrencia}
-            onChange={e => setForm({ ...form, dataOcorrencia: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm"
-          />
-          <textarea
-            required
-            placeholder="Descrição"
-            value={form.descricao}
-            onChange={e => setForm({ ...form, descricao: e.target.value })}
-            className="border rounded-lg px-3 py-2 text-sm md:col-span-2 min-h-[80px]"
-          />
-        </div>
-        <button type="submit" className="px-4 py-2 bg-[#0f2340] text-white rounded-lg text-sm font-semibold">
-          Salvar
-        </button>
-      </form>
-
-      <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="text-left px-4 py-2">Funcionário</th>
-            <th className="text-left px-4 py-2">Tipo</th>
-            <th className="text-left px-4 py-2">Data</th>
-            <th className="text-left px-4 py-2">Descrição</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lista.map(a => (
-            <tr key={a.id} className="border-t border-slate-100 align-top">
-              <td className="px-4 py-2">{a.funcionario?.nome ?? `#${a.funcionarioId}`}</td>
-              <td className="px-4 py-2">{a.tipo}</td>
-              <td className="px-4 py-2">{a.dataOcorrencia}</td>
-              <td className="px-4 py-2 max-w-md">{a.descricao}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {lista.length === 0 && <p className="text-slate-500 text-sm">Nenhuma advertência registrada.</p>}
-    </div>
-  );
+  return <div className="page-stack">
+    <PageHeading title="Advertências" description="Consulte ocorrências e registre medidas disciplinares." />
+    {erro && <Feedback>{erro}</Feedback>}
+    {notice && <Feedback kind="success">{notice}</Feedback>}
+    {canWrite && <SubmitForm submit={registrar} className="panel form-panel" aria-busy={saving}>
+      <h2>Nova advertência</h2>
+      <div className="form-grid">
+        <label className="form-label">Funcionário *<select required value={form.funcionarioId} onChange={(event) => setForm({ ...form, funcionarioId: event.target.value })}>
+          <option value="">Selecione</option>{funcionarios.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
+        </select></label>
+        <label className="form-label">Tipo<select value={form.tipo} onChange={(event) => setForm({ ...form, tipo: event.target.value })}>
+          {TIPOS.map((tipo) => <option key={tipo.value} value={tipo.value}>{tipo.label}</option>)}
+        </select></label>
+        <label className="form-label">Data da ocorrência<input type="date" value={form.dataOcorrencia} onChange={(event) => setForm({ ...form, dataOcorrencia: event.target.value })} /></label>
+        <label className="form-label field-wide">Descrição *<textarea required rows={3} value={form.descricao} onChange={(event) => setForm({ ...form, descricao: event.target.value })} /></label>
+      </div>
+      <button type="submit" className="ui-button" disabled={saving || !funcionarios.length}>{saving ? "Salvando…" : "Salvar advertência"}</button>
+    </SubmitForm>}
+    <section className="panel">
+      <div className="panel-heading"><h2>Histórico de advertências</h2></div>
+      {loading ? <Loading label="Carregando advertências" /> : loadError ? <Feedback retry={carregar}>{loadError}</Feedback> : lista.length ? <TableRegion label="Histórico de advertências">
+        <table><thead><tr><th scope="col">Funcionário</th><th scope="col">Tipo</th><th scope="col">Data</th><th scope="col">Descrição</th></tr></thead>
+          <tbody>{lista.map((item) => <tr key={item.id}>
+            <th scope="row">{item.funcionario?.nome ?? "#" + item.funcionarioId}</th>
+            <td><StatusBadge tone={item.tipo === "SUSPENSAO" ? "warning" : "neutral"}>{TIPOS.find((tipo) => tipo.value === item.tipo)?.label ?? item.tipo}</StatusBadge></td>
+            <td className="numeric">{item.dataOcorrencia ? item.dataOcorrencia.split("-").reverse().join("/") : "—"}</td>
+            <td>{item.descricao}</td>
+          </tr>)}</tbody>
+        </table>
+      </TableRegion> : <EmptyState title="Nenhuma advertência registrada" />}
+    </section>
+  </div>;
 }

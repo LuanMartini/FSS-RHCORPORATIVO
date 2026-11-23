@@ -1,28 +1,33 @@
-import { useState } from 'react';
-import type { ReactNode } from 'react';
-import { AuthContext } from './authState';
-import type { User } from './authState';
-import { setAccessToken } from '../services/api';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AuthContext, type User } from './authState';
+import { setAccessToken, setSessionExpiryHandler } from '../services/api';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<{ token: string; user: User } | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
-  const login = (tk: string, usr: User) => {
-    setAccessToken(tk);
-    setToken(tk);
-    setUser(usr);
-  };
+  function login(token: string, user: User) {
+    setAccessToken(token);
+    setSession({ token, user });
+    setSessionExpired(false);
+  }
 
-  const logout = () => {
+  function logout() {
     setAccessToken(null);
-    setToken(null);
-    setUser(null);
-  };
+    setSession(null);
+    setSessionExpired(false);
+  }
 
-  return (
-    <AuthContext.Provider value={{ token, user, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  useEffect(() => {
+    setSessionExpiryHandler(() => {
+      setAccessToken(null);
+      setSession(null);
+      setSessionExpired(true);
+    });
+    return () => setSessionExpiryHandler();
+  }, []);
+
+  return <AuthContext.Provider value={{
+    token: session?.token ?? null, user: session?.user ?? null, sessionExpired, login, logout,
+  }}>{children}</AuthContext.Provider>;
 }

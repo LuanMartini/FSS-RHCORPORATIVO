@@ -29,7 +29,7 @@ describe('telas prioritárias', () => {
   it('mantém login acessível e com campos nomeados', async () => {
     const view = render(<Login canRegister onSwitch={vi.fn()} />);
     expect(screen.getByLabelText(/e-mail/i)).toBeTruthy();
-    expect(screen.getByLabelText(/senha/i)).toBeTruthy();
+    expect(screen.getByLabelText(/senha/i, { selector: 'input' })).toBeTruthy();
     await expectAccessible(view);
   });
 
@@ -41,7 +41,7 @@ describe('telas prioritárias', () => {
 
   it('mantém férias acessível', async () => {
     const view = render(<Ferias funcionarios={funcionarios} onRefresh={vi.fn()} />);
-    expect(await screen.findByRole('heading', { name: /férias/i })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Férias', level: 1 })).toBeTruthy();
     await expectAccessible(view);
   });
 

@@ -1,3 +1,4 @@
+import { EmptyState, Feedback, Loading, PageHeading } from '../components/ui';
 import { useState } from 'react';
 import { apiFetch } from '../services/api';
 import type { FuncionarioView } from '../utils/funcionario';
@@ -18,14 +19,18 @@ interface Props {
   funcionarios: FuncionarioView[];
 }
 
+const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
 export default function Holerite({ funcionarios }: Props) {
   const ativos = funcionarios.filter(f => f.ativo);
   const [id, setId] = useState('');
   const [h, setH] = useState<HoleriteRes | null>(null);
   const [erro, setErro] = useState('');
+  const [loading, setLoading] = useState(false);
 
   async function carregar() {
-    if (!id) return;
+    if (!id || loading) return;
+    setLoading(true);
     setErro('');
     setH(null);
     try {
@@ -33,20 +38,21 @@ export default function Holerite({ funcionarios }: Props) {
       setH(data);
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao carregar holerite');
-    }
+    } finally { setLoading(false); }
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <h2 className="font-serif text-2xl text-[#0f2340]">Holerite</h2>
+    <div className="page-stack max-w-4xl">
+      <PageHeading title="Holerite" description="Consulte o demonstrativo de pagamento de um funcionário." />
 
-      <div className="flex flex-wrap gap-3 items-end bg-white border border-slate-200 rounded-lg p-4">
-        <div className="flex-1 min-w-[200px]">
+      <div className="panel compact-panel flex flex-wrap items-end gap-3">
+        <div className="form-label flex-1 min-w-[min(100%,200px)]">
           <label htmlFor="holerite-funcionario" className="block text-xs font-semibold text-slate-500 mb-1">Funcionário</label>
           <select
             value={id}
             id="holerite-funcionario"
-            onChange={e => setId(e.target.value)}
+            onChange={e => { setId(e.target.value); setH(null); setErro(''); }}
+            disabled={loading}
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
           >
             <option value="">Selecione</option>
@@ -58,30 +64,29 @@ export default function Holerite({ funcionarios }: Props) {
         <button
           type="button"
           onClick={carregar}
-          disabled={!id}
-          className="px-4 py-2 bg-[#0f2340] text-white rounded-lg text-sm font-semibold disabled:opacity-50"
+          disabled={loading || !id}
+          className="ui-button"
         >
-          Gerar
+          {loading ? 'Gerando…' : 'Gerar'}
         </button>
       </div>
 
-      {erro && <p role="alert" aria-live="assertive" className="text-red-700 text-sm">{erro}</p>}
+      {erro && <Feedback retry={carregar}>{erro}</Feedback>}
+      {loading && <Loading label="Gerando holerite" />}
+      {!ativos.length && <section className="panel"><EmptyState title="Nenhum funcionário disponível para consulta" /></section>}
 
       {h && (
-        <section aria-live="polite" aria-labelledby="holerite-gerado" className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-2 text-sm">
-          <h3 id="holerite-gerado" className="sr-only">Holerite gerado</h3>
-          <p><strong>Referência:</strong> {h.mesReferencia}/{h.anoReferencia}</p>
-          <p><strong>Nome:</strong> {h.funcionario.nome}</p>
-          <p><strong>CPF:</strong> {h.funcionario.cpf}</p>
-          <hr className="my-3" />
-          <p><strong>Salário base:</strong> R$ {h.vencimentos.salarioBase}</p>
-          <p><strong>INSS:</strong> R$ {h.descontos.inss}</p>
-          <p><strong>IRRF:</strong> R$ {h.descontos.irrf}</p>
-          <p><strong>FGTS (provisão):</strong> R$ {h.provisoes.fgts}</p>
-          <hr className="my-3" />
-          <p><strong>Total bruto:</strong> R$ {h.totalBruto}</p>
-          <p><strong>Total descontos:</strong> R$ {h.totalDescontos}</p>
-          <p className="text-lg font-semibold text-[#0f2340]"><strong>Líquido:</strong> R$ {h.totalLiquido}</p>
+        <section aria-live="polite" aria-labelledby="holerite-gerado" className="panel compact-panel page-stack">
+          <div><h2 id="holerite-gerado">Holerite gerado</h2><p>{h.funcionario.nome} · {String(h.mesReferencia).padStart(2, "0")}/{h.anoReferencia}</p>{h.funcionario.cpf && <p>CPF {h.funcionario.cpf}</p>}</div>
+          <dl className="detail-grid">
+            <div><dt>Salário base</dt><dd>{brl.format(Number(h.vencimentos.salarioBase))}</dd></div>
+            <div><dt>INSS</dt><dd>{brl.format(Number(h.descontos.inss))}</dd></div>
+            <div><dt>IRRF</dt><dd>{brl.format(Number(h.descontos.irrf))}</dd></div>
+            <div><dt>FGTS (provisão)</dt><dd>{brl.format(Number(h.provisoes.fgts))}</dd></div>
+            <div><dt>Total bruto</dt><dd>{brl.format(Number(h.totalBruto))}</dd></div>
+            <div><dt>Total de descontos</dt><dd>{brl.format(Number(h.totalDescontos))}</dd></div>
+          </dl>
+          <div className="payroll-total"><h3>Líquido a receber</h3><strong>{brl.format(Number(h.totalLiquido))}</strong></div>
         </section>
       )}
     </div>

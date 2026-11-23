@@ -1,3 +1,4 @@
+import { EmptyState, Feedback, Loading, PageHeading, TableRegion } from '../components/ui';
 import {
   memo,
   useCallback,
@@ -829,20 +830,7 @@ export default function AtsRecrutamento() {
           </span>
         </div>
       ))}
-      <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">
-            <span className="h-2 w-2 rounded-full bg-teal-500" />
-            Talent acquisition workspace
-          </div>
-          <h1 className="font-serif text-3xl font-semibold text-[#102a43]">
-            Recrutamento & Seleção
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Pipeline colaborativo, match de currículos e comunicação em tempo
-            real.
-          </p>
-        </div>
+      <div className="module-heading-with-actions"><PageHeading title="Recrutamento e seleção" description="Acompanhe vagas, mova candidatos pelo processo e agende entrevistas." />
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex -space-x-2">
             {presence.slice(0, 5).map((person) => (
@@ -860,13 +848,14 @@ export default function AtsRecrutamento() {
             {presence.length} online
           </span>
           <label
-            className={`cursor-pointer rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 ${uploading ? "pointer-events-none opacity-50" : ""}`}
+            className={`ui-button focus-within:outline-2 focus-within:outline-offset-2 ${uploading || !vacancyId || readOnly ? "opacity-50" : "cursor-pointer"}`}
           >
             {uploading ? "Analisando currículo…" : "Adicionar currículo"}
             <input
               type="file"
               accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              className="hidden"
+              className="sr-only"
+              disabled={uploading || !vacancyId || Boolean(readOnly)}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) void upload(file);
@@ -875,28 +864,14 @@ export default function AtsRecrutamento() {
             />
           </label>
         </div>
-      </header>
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-          <button onClick={() => setError("")} className="float-right">
-            ×
-          </button>
-        </div>
-      )}
-      {notice && (
-        <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-700">
-          {notice}
-          <button onClick={() => setNotice("")} className="float-right">
-            ×
-          </button>
-        </div>
-      )}
-      <section className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:flex-row lg:items-center">
+      </div>
+      {error && <Feedback retry={() => void loadBoard()}>{error}</Feedback>}
+      {notice && <Feedback kind="success">{notice}</Feedback>}
+      <section className="panel form-grid p-4">
         <select
-          value={vacancyId ?? ""}
+          aria-label="Vaga" value={vacancyId ?? ""}
           onChange={(e) => setVacancyId(Number(e.target.value))}
-          className="min-w-64 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700"
+          className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700"
         >
           {vacancies.map((vacancy) => (
             <option key={vacancy.id} value={vacancy.id}>
@@ -904,15 +879,14 @@ export default function AtsRecrutamento() {
             </option>
           ))}
         </select>
-        <div className="h-7 w-px bg-slate-200 max-lg:hidden" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar nome, e-mail ou skill…"
+          aria-label="Buscar candidato" type="search" placeholder="Nome, e-mail ou habilidade"
           className="min-w-0 flex-1 rounded-xl bg-slate-50 px-4 py-2.5 text-sm outline-none ring-1 ring-slate-200 focus:ring-teal-400"
         />
         <select
-          value={minScore}
+          aria-label="Compatibilidade mínima" value={minScore}
           onChange={(e) => setMinScore(Number(e.target.value))}
           className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-600"
         >
@@ -925,14 +899,12 @@ export default function AtsRecrutamento() {
         </span>
       </section>
       {loading ? (
-        <div className="h-[68vh] animate-pulse rounded-2xl bg-slate-200/70" />
+        <Loading label="Carregando recrutamento" />
       ) : vacancies.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-20 text-center text-sm text-slate-400">
-          Nenhuma vaga disponível para seu usuário.
-        </div>
+        <section className="panel"><EmptyState title="Nenhuma vaga disponível" /></section>
       ) : (
-        <div className="overflow-x-auto pb-3">
-          <div className="flex min-w-max gap-3">
+        <TableRegion label="Etapas do recrutamento">
+          <div className="flex min-w-max gap-3 pb-3">
             {ATS_STAGES.map((stage) => (
               <VirtualColumn
                 key={stage}
@@ -947,7 +919,7 @@ export default function AtsRecrutamento() {
               />
             ))}
           </div>
-        </div>
+        </TableRegion>
       )}
       {selected && (
         <CandidateDrawer

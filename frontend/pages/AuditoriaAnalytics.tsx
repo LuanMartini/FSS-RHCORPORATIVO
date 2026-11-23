@@ -1,3 +1,5 @@
+import { useAuth } from '../context/useAuth';
+import { Feedback, Loading, PageHeading } from '../components/ui';
 import {
   useCallback,
   useEffect,
@@ -105,6 +107,7 @@ function IntegrityPill({ integrity }: { integrity: IntegrityStatus }) {
 }
 
 export default function AuditoriaAnalytics() {
+  const canVerify = useAuth().user?.permissoes.includes('audit.verify');
   const [period, setPeriod] = useState(12);
   const [data, setData] = useState<AuditDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -160,34 +163,7 @@ export default function AuditoriaAnalytics() {
     [data],
   );
 
-  if (loading && !data)
-    return (
-      <div className="space-y-4">
-        <div className="h-44 animate-pulse rounded-3xl bg-slate-900" />
-        <div className="grid gap-4 md:grid-cols-3">
-          {[1, 2, 3].map((item) => (
-            <div
-              key={item}
-              className="h-40 animate-pulse rounded-2xl bg-slate-200"
-            />
-          ))}
-        </div>
-      </div>
-    );
-  if (error && !data)
-    return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-800">
-        <p className="font-bold">Painel indisponível</p>
-        <p className="mt-1 text-sm">{error}</p>
-        <button
-          onClick={() => void load()}
-          className="mt-4 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white"
-        >
-          Tentar novamente
-        </button>
-      </div>
-    );
-  if (!data) return null;
+  if (!data) return <div className="page-stack"><PageHeading title="Auditoria e indicadores" />{loading ? <Loading label="Carregando auditoria" /> : <Feedback retry={() => void load()}>{error || "Não foi possível carregar a auditoria."}</Feedback>}</div>;
 
   const cards = [
     {
@@ -218,48 +194,30 @@ export default function AuditoriaAnalytics() {
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-5 pb-12">
-      <header className="relative overflow-hidden rounded-3xl bg-[#0b1324] px-6 py-7 text-white shadow-2xl shadow-slate-900/20 sm:px-8">
-        <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-indigo-500/20 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-32 w-64 bg-teal-400/10 blur-3xl" />
-        <div className="relative flex flex-col justify-between gap-6 xl:flex-row xl:items-end">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-[.25em] text-teal-300">
-                Control room · RH estratégico
-              </p>
-              <IntegrityPill integrity={data.integrity} />
-            </div>
-            <h1 className="mt-3 max-w-3xl text-2xl font-semibold tracking-tight sm:text-3xl">
-              Auditoria imutável & inteligência de pessoas
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-              Integridade criptográfica, sinais de rotatividade e equidade
-              salarial em uma visão executiva com privacidade por desenho.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-xl border border-white/10 bg-white/5 p-1">
+      <div className="module-heading-with-actions">
+        <PageHeading title="Auditoria e indicadores" description="Acompanhe a integridade dos registros, a rotatividade e a equidade salarial." />
+        <div className="action-row"><IntegrityPill integrity={data.integrity} />
+            <div className="flex flex-wrap rounded-xl border border-slate-200 bg-white p-1" aria-label="Período" role="group">
               {[6, 12, 24].map((item) => (
                 <button
                   key={item}
-                  onClick={() => setPeriod(item)}
-                  className={`rounded-lg px-3 py-2 text-xs font-bold transition ${period === item ? "bg-white text-slate-900 shadow" : "text-slate-300 hover:bg-white/10"}`}
+                  type="button" aria-pressed={period === item} onClick={() => setPeriod(item)}
+                  className={`rounded-lg px-3 py-2 text-xs font-bold transition ${period === item ? "bg-blue-100 text-blue-900" : "text-slate-600 hover:bg-slate-100"}`}
                 >
                   {item} meses
                 </button>
               ))}
             </div>
-            <button
+            {canVerify && <button type="button"
               onClick={() => void verify()}
               disabled={verifying}
-              className="flex items-center gap-2 rounded-xl bg-teal-400 px-4 py-2.5 text-xs font-extrabold text-slate-950 transition hover:bg-teal-300 disabled:opacity-60"
+              className="ui-button"
             >
               <Icon path="M20 6 9 17l-5-5" />
-              {verifying ? "Verificando…" : "Verificar ledger"}
-            </button>
-          </div>
+              {verifying ? "Verificando…" : "Verificar integridade"}
+            </button>}
         </div>
-      </header>
+      </div>
 
       {error && (
         <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

@@ -10,22 +10,28 @@ export interface FuncionarioView {
   status?: string;
 }
 
-export function labelNome(val: unknown): string {
-  if (val == null) return '—';
-  if (typeof val === 'string') return val;
-  if (typeof val === 'object' && val !== null && 'nome' in val) {
-    return String((val as { nome: string }).nome);
-  }
+const statusLabels: Record<string, string> = {
+  ATIVO: 'Ativo', DESLIGADO: 'Desligado', FERIAS: 'Em férias', AFASTADO: 'Afastado', INATIVO: 'Inativo',
+};
+
+export function employeeStatusLabel(status?: string) {
+  return status ? (statusLabels[status] ?? status.replaceAll('_', ' ')) : 'Não informado';
+}
+
+export function labelNome(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'nome' in value && typeof value.nome === 'string') return value.nome;
   return '—';
 }
 
 export function mapFuncionarioApi(raw: Record<string, unknown>): FuncionarioView {
+  const salario = raw.salario == null || raw.salario === '' ? undefined : Number(raw.salario);
   return {
     id: String(raw.id ?? ''),
     nome: String(raw.nome ?? ''),
     cargoLabel: labelNome(raw.cargo),
     departamentoLabel: labelNome(raw.departamento),
-    salario: typeof raw.salario === 'number' ? raw.salario : Number(raw.salario),
+    salario: Number.isFinite(salario) ? salario : undefined,
     cpf: raw.cpf != null ? String(raw.cpf) : undefined,
     email: raw.email != null ? String(raw.email) : undefined,
     ativo: raw.status === 'ATIVO' || raw.status === 'FERIAS',
