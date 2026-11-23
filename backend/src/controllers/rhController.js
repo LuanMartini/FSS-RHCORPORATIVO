@@ -28,25 +28,32 @@ function horaBr(dt) {
 
 export async function dashboard(req, res, next) {
   try {
+    const principal = await loadPrincipal(req);
     const st = await rh.countsFuncionarios();
     const total = st.ATIVO + st.DESLIGADO + st.FERIAS;
-    const folks = await rh.listFuncionariosComSalario();
-    let custoMensalBruto = 0;
-    let custoFGTS = 0;
-    const salarios = [];
-    for (const f of folks) {
-      const sb = Number(f.salario);
-      custoMensalBruto += sb;
-      custoFGTS += calcularFGTS(sb);
-      salarios.push(sb);
+    let folha;
+    if (principal.permissions.has('payroll.read')) {
+      const folks = await rh.listFuncionariosComSalario();
+      let custoMensalBruto = 0;
+      let custoFGTS = 0;
+      const salarios = [];
+      for (const f of folks) {
+        const sb = Number(f.salario);
+        custoMensalBruto += sb;
+        custoFGTS += calcularFGTS(sb);
+        salarios.push(sb);
+      }
+      salarios.sort((a, b) => a - b);
+      const n = salarios.length;
+      folha = {
+        custoMensalBruto: fmt(custoMensalBruto),
+        mediaSalarial: fmt(n ? custoMensalBruto / n : 0),
+        maiorSalario: fmt(n ? salarios[n - 1] : 0),
+        menorSalario: fmt(n ? salarios[0] : 0),
+        custoFGTS: fmt(custoFGTS),
+        custoTotalEmpresa: fmt(custoMensalBruto + custoFGTS),
+      };
     }
-    salarios.sort((a, b) => a - b);
-    const n = salarios.length;
-    const media = n ? custoMensalBruto / n : 0;
-    const maior = n ? salarios[n - 1] : 0;
-    const menor = n ? salarios[0] : 0;
-    const encargos = custoFGTS;
-    const custoTotalEmpresa = custoMensalBruto + encargos;
     const { cargos: totalCargos, deptos: totalDepartamentos } = await rh.countsCargosDeptos();
     const dist = await rh.countsDeptDist();
     const registrosHoje = await rh.countPontoHoje();
@@ -58,14 +65,7 @@ export async function dashboard(req, res, next) {
         desligados: st.DESLIGADO,
         emFerias: st.FERIAS,
       },
-      folha: {
-        custoMensalBruto: fmt(custoMensalBruto),
-        mediaSalarial: fmt(media),
-        maiorSalario: fmt(maior),
-        menorSalario: fmt(menor),
-        custoFGTS: fmt(custoFGTS),
-        custoTotalEmpresa: fmt(custoTotalEmpresa),
-      },
+      ...(folha ? { folha } : {}),
       estrutura: {
         totalDepartamentos,
         totalCargos,
@@ -114,7 +114,11 @@ export async function funcionarioDesligar(req, res, next) {
 
 export async function cargos(req, res, next) {
   try {
-    res.json(await rh.listCargos());
+    const principal = await loadPrincipal(req);
+    const canSeeSalary = ['payroll.read', 'employee.read.salary', 'employee.write']
+      .some((permission) => principal.permissions.has(permission));
+    const cargosList = await rh.listCargos();
+    res.json(canSeeSalary ? cargosList : cargosList.map(({ salarioBase, ...rest }) => rest));
   } catch (e) {
     next(e);
   }
@@ -152,6 +156,12 @@ export async function admitir(req, res, next) {
     const cargos = await rh.listCargos();
     const cg = cargos.find((c) => c.id === cargoId);
     if (!cg) return res.status(400).json({ erro: 'Cargo inválido' });
+    if (deptId != null && !(await rh.listDepartamentos()).some((d) => Number(d.id) === deptId)) {
+      return res.status(400).json({ erro: 'Departamento inválido' });
+    }
+    if (deptId != null && cg.departamentoId != null && Number(cg.departamentoId) !== deptId) {
+      return res.status(422).json({ erro: 'O cargo selecionado não pertence ao departamento informado.', codigo: 'CARGO_DEPARTAMENTO_INCONSISTENTE' });
+    }
     const principal=await loadPrincipal(req);
     const input=parseNewAdmission({
       nomeCompleto:String(b.nome).trim(),cpf,email:String(b.email).trim(),cargoId,

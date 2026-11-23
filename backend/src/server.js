@@ -111,6 +111,16 @@ export function errorCaptureMiddleware(err, req, res, next) {
     next(err);
     return;
   }
+  const dbError = {
+    23503: [409, 'Registro relacionado nao encontrado ou ainda em uso.', 'FOREIGN_KEY_VIOLATION'],
+    23514: [422, 'Valor fora das regras permitidas.', 'CONSTRAINT_VIOLATION'],
+    22007: [400, 'Data invalida.', 'INVALID_INPUT'],
+    22008: [400, 'Data invalida.', 'INVALID_INPUT'],
+    '22P02': [400, 'Formato de dado invalido.', 'INVALID_INPUT'],
+  }[err.code];
+  if (dbError && !err.status) {
+    [err.status, err.message, err.code] = dbError;
+  }
   const status = err.status || 500;
   const message = status >= 500 ? 'Erro interno do servidor' : err.message;
   if (status >= 500) {

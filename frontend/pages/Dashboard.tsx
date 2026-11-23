@@ -9,7 +9,7 @@ export interface MetricasDashboard {
     desligados: number;
     emFerias: number;
   };
-  folha: {
+  folha?: {
     custoMensalBruto: string;
     mediaSalarial: string;
     maiorSalario: string;
@@ -73,8 +73,12 @@ export default function Dashboard({ metricas, funcionarios, setPage }: Props) {
         {metricas && (
           <p className="text-slate-500 text-sm mt-2">
             Registros de ponto hoje: <strong>{metricas.pontoDoDia.registrosHoje}</strong>
-            {' · '}
-            Custo folha bruto: R$ {metricas.folha.custoMensalBruto}
+            {metricas.folha && (
+              <>
+                {' · '}
+                Custo folha bruto: R$ {metricas.folha.custoMensalBruto}
+              </>
+            )}
           </p>
         )}
       </div>

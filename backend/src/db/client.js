@@ -22,10 +22,11 @@ export async function getPool() {
   } else {
     pool = new pg.Pool({
       host: process.env.PG_HOST || 'localhost',
-      port: Number(process.env.PG_PORT || 5432),
-      user: process.env.PG_USER || 'postgres',
-      password: process.env.PG_PASSWORD ?? 'postgres',
-      database: process.env.PG_DATABASE || 'rhcorp',
+      port: Number(process.env.PG_PORT || process.env.RHCORP_POSTGRES_PORT || 5432),
+      user: process.env.PG_USER || process.env.POSTGRES_USER || 'postgres',
+      // Sem senha padrao versionada: a credencial vem sempre do ambiente.
+      password: process.env.PG_PASSWORD ?? process.env.POSTGRES_PASSWORD,
+      database: process.env.PG_DATABASE || process.env.POSTGRES_DB || 'rhcorp',
       max: Number(process.env.PG_POOL_MAX || 10),
       connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 5000),
       idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),

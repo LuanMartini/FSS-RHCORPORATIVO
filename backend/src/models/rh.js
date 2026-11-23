@@ -81,7 +81,7 @@ export async function listFerias(scope={all:true,managerId:null}) {
   const filter=scope.all?'':`WHERE (c.id=? OR c.gestor_id=?)`;
   const params=scope.all?[]:[scope.managerId,scope.managerId];
   const rows = await all(
-    `SELECT f.id, f.colaborador_id AS funcionarioId, f.data_inicio AS dataInicio, f.data_fim AS dataFim,
+    `SELECT f.id, f.colaborador_id AS "funcionarioId", f.data_inicio AS "dataInicio", f.data_fim AS "dataFim",
             f.status,f.versao,f.dias,COALESCE(c.nome_social,c.nome_completo) AS fnome
      FROM ferias f
      JOIN colaboradores c ON f.colaborador_id = c.id
@@ -190,8 +190,8 @@ export async function sincronizarFerias() {
 
 export async function listAdvertencias() {
   const rows = await all(
-    `SELECT a.id, a.funcionario_id AS funcionarioId, a.tipo, a.descricao,
-            a.data_ocorrencia AS dataOcorrencia, COALESCE(c.nome_social,c.nome_completo) AS fnome
+    `SELECT a.id, a.funcionario_id AS "funcionarioId", a.tipo, a.descricao,
+            a.data_ocorrencia AS "dataOcorrencia", COALESCE(c.nome_social,c.nome_completo) AS fnome
      FROM advertencias a
      LEFT JOIN funcionarios_colaboradores m ON m.funcionario_id = a.funcionario_id
      LEFT JOIN colaboradores c ON c.id = m.colaborador_id
@@ -347,7 +347,7 @@ export async function createCandidato(body) {
 
 export async function listCandidatos(vagaId) {
   return all(
-    `SELECT id, vaga_id AS vagaId, nome, email, telefone, link_curriculo AS linkCurriculo, fase 
+    `SELECT id, vaga_id AS "vagaId", nome, email, telefone, link_curriculo AS "linkCurriculo", fase 
      FROM candidatos WHERE vaga_id = ? ORDER BY id DESC`,
     [vagaId]
   );
